@@ -6,20 +6,25 @@ const VERSION = 'version-aaaaaaaaaaaaaaaa';
 const EXE = `C:\\Users\\x\\AppData\\Local\\Fishstrap\\Versions\\${VERSION}\\RobloxPlayerBeta.exe`;
 const regions = [
   { base: BASE + 0x100000, size: 0x200000, prot: 0x04 },   // .data (flags)
-  { base: BASE + 0x2000000, size: 0x10000, prot: 0x02 },   // só leitura (offset errado)
+  { base: BASE + 0x2000000, size: 0x10000, prot: 0x20 },   // código (offset errado)
+  { base: BASE + 0x2100000, size: 0x10000, prot: 0x02 },   // dados só leitura
+  { base: BASE + 0x2200000, size: 0x10000, prot: 0x04, hidden: true }, // VirtualQueryEx não informa
 ];
 for (const r of regions) r.buf = Buffer.alloc(r.size);
 const writes = [];
 let running = true;
 let startTime = 1000n;
 const failWrites = new Set();
+const protectCalls = [];
+const WRITABLE = new Set([0x04, 0x08, 0x40, 0x80]);
 function find(addr, len) { return regions.find((r) => addr >= r.base && addr + len <= r.base + r.size); }
 const mem = {
   BASE, VERSION, PID, regions, writes,
   read(addr, len) { const r = find(addr, len); return r ? Buffer.from(r.buf.subarray(addr - r.base, addr - r.base + len)) : null; },
   poke(addr, data) { const r = find(addr, data.length); data.copy(r.buf, addr - r.base); },
   setRunning(v) { running = v; },
-  failWrites,
+  failWrites, protectCalls,
+  region(addr) { return regions.find((x) => addr >= x.base && addr < x.base + x.size); },
   // Roblox fechado e aberto de novo com o MESMO PID: horário de criação diferente.
   restart(memory) { startTime += 1n; if (memory) memory.copy(regions[0].buf); },
 };
@@ -42,18 +47,24 @@ const impl = {
   ReadProcessMemory: (h, addr, buf, len, br) => { const d = mem.read(addr, len); if (!d) return 0; d.copy(buf); br[0] = len; return 1; },
   NtWriteVirtualMemory: (h, addr, data, len, bw) => {
     const r = find(addr, len);
-    if (!r || r.prot !== 0x04 || failWrites.has(addr)) return -1;
+    if (!r || !WRITABLE.has(r.prot) || failWrites.has(addr)) return -1;
     writes.push({ addr, data: Buffer.from(data.subarray(0, len)) });
     data.copy(r.buf, addr - r.base, 0, len); bw[0] = len; return 0;
   },
   WriteProcessMemory: () => 0,
   VirtualQueryEx: (h, addr, mbi) => {
     const r = regions.find((x) => addr >= x.base && addr < x.base + x.size);
-    if (!r) return 0;
+    if (!r || r.hidden) return 0;
     mbi.writeBigUInt64LE(BigInt(r.base), 0); mbi.writeBigUInt64LE(BigInt(r.size), 24);
     mbi.writeUInt32LE(0x1000, 32); mbi.writeUInt32LE(r.prot, 36); return 48;
   },
-  VirtualProtectEx: () => { throw new Error('VirtualProtectEx não deveria ser chamado'); },
+  VirtualProtectEx: (h, addr, len, prot, old) => {
+    const r = regions.find((x) => addr >= x.base && addr + len <= x.base + x.size);
+    if (!r) return 0;
+    if (r.prot === 0x10 || r.prot === 0x20) throw new Error('não deveria liberar escrita em página de código');
+    protectCalls.push({ addr, len, prot, from: r.prot });
+    old[0] = r.prot; r.prot = prot; return 1;
+  },
 };
 const koffi = {
   load: () => ({ func: (name) => impl[name] ?? (() => 0) }),
