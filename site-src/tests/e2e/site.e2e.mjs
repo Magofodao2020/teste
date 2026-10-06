@@ -336,6 +336,62 @@ describe('ações e macros', () => {
     await ctx.close();
   });
 
+  it('gatilho com botões do mouse: meio, laterais e scroll; o lateral não volta a página nem perde a edição', async () => {
+    const { page, ctx, errors } = await open({ [LIVE_URL]: { body: V_SITE } });
+    await page.goto(`${SITE}#/acoes`);
+    const cdp = await ctx.newCDPSession(page);
+    const press = async (loc, button) => {
+      const b = await loc.boundingBox(); const x = b.x + 6, y = b.y + 6;
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button, buttons: { middle: 4, back: 8, forward: 16 }[button], clickCount: 1 });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button, buttons: 0, clickCount: 1 });
+    };
+    await page.evaluate(() => { window.__mu = []; window.addEventListener('mouseup', (e) => window.__mu.push([e.button, e.defaultPrevented])); });
+    const cap = row(page, 'Perfect Dive').getByRole('button', { name: 'Botão de Perfect Dive' });
+    const triggerOf = () => helper.state.macros?.find((m) => m.id === 'perfect-dive')?.trigger;
+    const capture = async (act, label, code) => {
+      await cap.click(); await page.waitForTimeout(250);
+      await act();
+      await waitFor(async () => (await cap.textContent()).includes(label));
+      await waitFor(() => triggerOf() === code);
+    };
+    await capture(() => press(cap, 'middle'), 'Botão do meio', 'MouseMiddle');
+    await capture(() => press(cap, 'forward'), 'Lateral ► (avançar)', 'MouseForward');
+    await capture(() => press(cap, 'back'), 'Lateral ◄ (voltar)', 'MouseBack');
+    await capture(() => page.mouse.wheel(0, 120), 'Scroll ↓', 'ScrollDown');
+    // mouseup dos laterais tem o padrão cancelado (Chrome/Edge não voltam a página)
+    const side = (await page.evaluate(() => window.__mu)).filter(([b]) => b === 3 || b === 4);
+    assert.equal(side.length, 2);
+    assert.ok(side.every(([, prevented]) => prevented));
+    // navegador que só faz "voltar" (sem evento de mouse): vira MouseBack e a página fica
+    await capture(() => page.evaluate(() => history.back()), 'Lateral ◄ (voltar)', 'MouseBack');
+    assert.match(page.url(), /#\/acoes$/);
+    // mouse com software que manda a tecla "Voltar do navegador"
+    await capture(() => cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', code: 'BrowserBack', key: 'BrowserBack', windowsVirtualKeyCode: 166 }), 'Voltar (lateral via software)', 'VK_A6');
+
+    // no editor: o lateral define o gatilho e a edição não se perde
+    await page.getByRole('button', { name: 'Criar ação' }).click();
+    await page.getByLabel('Nome da ação').fill('Lateral');
+    const trig = page.getByRole('button', { name: 'Botão que ativa' });
+    await trig.click(); await page.waitForTimeout(250);
+    await press(trig, 'back');
+    await waitFor(async () => (await trig.textContent()).includes('Lateral ◄'));
+    assert.equal(await page.getByLabel('Nome da ação').inputValue(), 'Lateral');
+    await page.getByLabel('Tipo da nova etapa').selectOption('wait');
+    await page.getByRole('button', { name: 'Adicionar etapa' }).click();
+    await page.getByRole('button', { name: 'Salvar' }).click();
+    await page.getByText('Ação "Lateral" criada · Status: desativada.').waitFor();
+    assert.equal(await row(page, 'Lateral').getByRole('button', { name: 'Botão de Lateral' }).textContent().then((t) => t.includes('Lateral ◄')), true);
+
+    // o Voltar da barra do navegador continua funcionando
+    await page.getByRole('link', { name: 'Painel', exact: true }).click();
+    await waitFor(() => /#\/painel$/.test(page.url()));
+    await page.waitForTimeout(1600); // longe de um aperto de lateral (esse "voltar" seria do mouse)
+    await page.evaluate(() => history.back());
+    await waitFor(() => /#\/acoes$/.test(page.url()));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
   it('Helper reiniciado recebe offsets, ações e atalhos de novo', async () => {
     const { ctx } = await open({ [LIVE_URL]: { body: V_SITE } });
     await waitFor(() => helper.state.offsets && helper.state.macros);

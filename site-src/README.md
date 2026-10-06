@@ -100,6 +100,12 @@ Nenhuma ação começa ativa. Os tipos de etapa são exatamente os que o Helper 
 (`flick, move, path, click, down, up, scroll, key, keydown, keyup, text, wait`).
 A gravação usa as rotas do Helper `/macro/record/*` (hook global do Windows).
 
+Gatilhos aceitam teclas, botões do mouse (esquerdo, direito, meio, laterais) e scroll.
+`src/ui/sideGuard.ts` impede que os botões laterais façam o navegador voltar/avançar
+(cancela o `mouseup` e mantém uma entrada-guarda no histórico); se o navegador só gerar
+o "voltar" sem evento de mouse, a captura registra `MouseBack`. Mouses com software que
+mandam a tecla "Voltar do navegador" viram `VK_A6`/`VK_A7`, que o Helper já entende.
+
 ### Dados do usuário
 
 Offsets: **somente na memória da aba** (nada é gravado no computador; ao reabrir o site,

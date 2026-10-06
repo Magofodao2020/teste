@@ -411,6 +411,7 @@ export async function parseMacroImport(text: string): Promise<Macro[]> {
 const TRIGGER_LABELS: Record<string, string> = {
   MouseLeft: 'Botão esquerdo', MouseRight: 'Botão direito', MouseMiddle: 'Botão do meio',
   MouseBack: 'Lateral ◄ (voltar)', MouseForward: 'Lateral ► (avançar)',
+  VK_A6: 'Voltar (lateral via software)', VK_A7: 'Avançar (lateral via software)',
   ScrollUp: 'Scroll ↑', ScrollDown: 'Scroll ↓', Space: 'Espaço', Enter: 'Enter', Escape: 'Esc',
   ShiftLeft: 'Shift', ShiftRight: 'Shift dir.', ControlLeft: 'Ctrl', ControlRight: 'Ctrl dir.', AltLeft: 'Alt', AltRight: 'AltGr',
   ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Backspace: 'Backspace', Tab: 'Tab',

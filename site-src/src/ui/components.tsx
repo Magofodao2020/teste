@@ -7,6 +7,7 @@ import {
 import { triggerLabel } from '../core/macros';
 import { store, useApp } from '../state/store';
 import logoUrl from './bope.png';
+import { beginSideCapture } from './sideGuard';
 
 export function Logo({ className, alt = 'BOPE' }: { className?: string; alt?: string }) {
   return <img src={logoUrl} className={className} alt={alt} draggable={false} />;
@@ -113,9 +114,12 @@ export function Confirm({ title, children, confirmLabel, danger, onConfirm, onCl
 }
 
 const MOUSE_BUTTONS: Record<number, string> = { 0: 'MouseLeft', 1: 'MouseMiddle', 2: 'MouseRight', 3: 'MouseBack', 4: 'MouseForward' };
+// Mouses com software (Logitech, Razer…) podem mandar o lateral como tecla
+// "Voltar/Avançar do navegador". O Helper entende o VK direto (VK_BROWSER_BACK/FORWARD).
+const BROWSER_KEYS: Record<string, string> = { BrowserBack: 'VK_A6', BrowserForward: 'VK_A7' };
 
 export function isMouseCode(code: string | null | undefined) {
-  return !!code && /^(Mouse|Scroll)/.test(code);
+  return !!code && /^(Mouse|Scroll|VK_A[67]$)/.test(code);
 }
 
 /**
@@ -139,7 +143,7 @@ export function KeyCapture({ value, onChange, allowScroll = true, keyboardOnly =
     const onKey = (e: KeyboardEvent) => {
       e.preventDefault(); e.stopPropagation();
       if (e.code === 'Escape') finish(null);
-      else if (e.code) finish(e.code);
+      else if (e.code) finish(BROWSER_KEYS[e.code] ?? e.code);
     };
     const onMouse = (e: MouseEvent) => {
       if (!armed || keyboardOnly) return;
@@ -153,12 +157,15 @@ export function KeyCapture({ value, onChange, allowScroll = true, keyboardOnly =
       finish(e.deltaY < 0 ? 'ScrollUp' : 'ScrollDown');
     };
     const block = (e: Event) => e.preventDefault();
+    // Lateral que o navegador transformou direto em "voltar" (sem evento de mouse).
+    const endSide = beginSideCapture((code) => { if (armed && !keyboardOnly) finish(code); });
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('mousedown', onMouse, true);
     window.addEventListener('wheel', onWheel, { capture: true, passive: false });
     window.addEventListener('contextmenu', block, true);
     return () => {
       clearTimeout(arm);
+      endSide();
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('mousedown', onMouse, true);
       window.removeEventListener('wheel', onWheel, true);
