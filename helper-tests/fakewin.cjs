@@ -11,12 +11,17 @@ const regions = [
 for (const r of regions) r.buf = Buffer.alloc(r.size);
 const writes = [];
 let running = true;
+let startTime = 1000n;
+const failWrites = new Set();
 function find(addr, len) { return regions.find((r) => addr >= r.base && addr + len <= r.base + r.size); }
 const mem = {
   BASE, VERSION, PID, regions, writes,
   read(addr, len) { const r = find(addr, len); return r ? Buffer.from(r.buf.subarray(addr - r.base, addr - r.base + len)) : null; },
   poke(addr, data) { const r = find(addr, data.length); data.copy(r.buf, addr - r.base); },
   setRunning(v) { running = v; },
+  failWrites,
+  // Roblox fechado e aberto de novo com o MESMO PID: horário de criação diferente.
+  restart(memory) { startTime += 1n; if (memory) memory.copy(regions[0].buf); },
 };
 globalThis.__fakeWin = mem;
 const H = (n) => ({ h: n });
@@ -26,17 +31,18 @@ const impl = {
   CreateToolhelp32Snapshot: () => (running ? H(9) : H(9)),
   Process32FirstW: (s, pe) => { if (!running) return 0; pe.szExeFile = 'RobloxPlayerBeta.exe'; pe.th32ProcessID = PID; return 1; },
   Process32NextW: () => 0,
-  Module32FirstW: (s, me) => { if (!running) return 0; me.szModule = 'RobloxPlayerBeta.exe'; me.szExePath = EXE; me.modBaseAddr = BASE; return 1; },
+  Module32FirstW: (s, me) => { if (!running) return 0; me.szModule = 'RobloxPlayerBeta.exe'; me.szExePath = EXE; me.modBaseAddr = BASE; me.modBaseSize = 0x3000000; return 1; },
   Module32NextW: () => 0,
   QueryFullProcessImageNameW: (h, f, buf, size) => { const b = Buffer.from(EXE, 'utf16le'); b.copy(buf); size[0] = EXE.length; return 1; },
   FindWindowW: () => (running ? 1 : 0),
   GetWindowThreadProcessId: (hwnd, out) => { out[0] = PID; return 1; },
-  NtQueryInformationProcess: () => -1,
+  GetExitCodeProcess: (h, out) => { out[0] = running ? 259 : 0; return 1; },
+  GetProcessTimes: (h, c) => { c.writeBigUInt64LE(startTime, 0); return 1; },
   NtReadVirtualMemory: (h, addr, buf, len, br) => { const d = mem.read(addr, len); if (!d) return -1; d.copy(buf); br[0] = len; return 0; },
   ReadProcessMemory: (h, addr, buf, len, br) => { const d = mem.read(addr, len); if (!d) return 0; d.copy(buf); br[0] = len; return 1; },
   NtWriteVirtualMemory: (h, addr, data, len, bw) => {
     const r = find(addr, len);
-    if (!r || r.prot !== 0x04) return -1;
+    if (!r || r.prot !== 0x04 || failWrites.has(addr)) return -1;
     writes.push({ addr, data: Buffer.from(data.subarray(0, len)) });
     data.copy(r.buf, addr - r.base, 0, len); bw[0] = len; return 0;
   },
