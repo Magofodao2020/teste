@@ -21,14 +21,15 @@ src/
     flags.ts            nomes/tipos de flag — espelho exato do Helper
     offsets/dataset.ts  modelo do dataset + parsers/validação (JSON do site, offsets.json, FFlags.hpp)
     offsets/service.ts  ÚNICO ponto que busca versão LIVE/offsets na internet (com cache e fallback)
+    offsets/remote.ts   fetch com diagnóstico (CORS × rede × HTTP × formato) e proxy do site
     helper/client.ts    cliente do Helper local (127.0.0.1:7962–7966)
-    actions.ts          as cinco ações (pack exato) e regras de botão
+    macros.ts           ações/macros (modelos, sanitização igual ao Helper, import/export)
     presets.ts          presets, importação/exportação, limpeza de flags inexistentes
     storage/            IndexedDB do site (presets + cache de offsets) e localStorage (preferências)
   state/
     store.ts            estado central + sincronização com o Helper (fila serializada)
     status.ts           textos de status em pt-BR (funções puras)
-  pages/                Painel, Ações, Presets, Catálogo, Configurações
+  pages/                Painel, Ações (+ editor/gravador), Presets, Catálogo, Configurações
   ui/                   componentes, tema BOPE, logo e fontes (locais, sem CDN)
 ```
 
@@ -43,8 +44,48 @@ src/
 4. Baixa → faz o parse → valida → só então troca o dataset. Falhas mantêm o dataset atual.
 5. Nova verificação a cada 30 min com a aba visível (ou ao voltar para a aba depois disso).
 
-O site envia ao Helper apenas o necessário (`/set-offsets`: versão, nomes e RVAs).
-O Helper não acessa a internet.
+A interface sempre diferencia: **✓ Versão LIVE verificada** · **⚠ Versão LIVE não
+verificada** (usando o último dataset válido, que NÃO é confirmado como atual) ·
+**✕ Não foi possível carregar os offsets**. A causa exata fica em
+Configurações → Diagnóstico da conexão.
+
+### Diagnóstico de falhas (`src/core/offsets/remote.ts`)
+
+Quando um `fetch` falha por CORS, DNS, certificado ou falta de internet, o navegador
+entrega ao JavaScript sempre o mesmo `TypeError: Failed to fetch`. Para não chutar:
+
+- pedido normal (`mode: 'cors'`) → se falhar, sonda `mode: 'no-cors'` na mesma URL;
+- a sonda responde → o servidor respondeu, mas **CORS bloqueou a leitura da resposta**
+  (a origem enviada aparece no diagnóstico);
+- a sonda também falha → sem conexão (DNS, certificado, firewall/antivírus, extensão ou internet);
+- HTTP ≠ 2xx, tempo esgotado, resposta vazia e resposta que não é `version-<16 hex>` têm
+  mensagens próprias.
+
+### Proxy do site (só se o CORS bloquear)
+
+O serviço precisa responder com `Access-Control-Allow-Origin` para o navegador ler a
+resposta. Se não responder, o site usa um proxy **do próprio hosting** na mesma
+origem (`/api/imtheo/roblox/version`, `/api/imtheo/offsets.json`, `/api/imtheo/FFlags.hpp`).
+Lista fechada de caminhos, só GET, sem credenciais. O Helper nunca participa.
+
+| Hosting | Arquivo (já incluso no build) |
+|---|---|
+| Cloudflare Pages | `_worker.js` + `_routes.json` (proxy com cache na borda) |
+| Netlify | `_redirects` (regras de proxy 200) |
+| Vercel | `vercel.json` (rewrites) |
+| GitHub Pages / outro estático puro | sem proxy: funciona só se o serviço liberar CORS |
+
+**Recomendado: Cloudflare Pages** — HTTPS automático, `_headers` já usado pelo site,
+proxy (`_worker.js`) funciona até no upload direto do zip, cache na borda e plano
+gratuito generoso. Netlify é a segunda opção (proxy por uma linha no `_redirects`).
+
+### Ações e macros
+
+`src/core/macros.ts`: macros do usuário (criar, editar, gravar, importar/exportar) e os
+modelos do BOPE (Bug Indi, Bug indi ESQUERDA, Bug indi DIREITA, Perfect Dive, Gagatech).
+Nenhuma ação começa ativa. Os tipos de etapa são exatamente os que o Helper executa
+(`flick, move, path, click, down, up, scroll, key, keydown, keyup, text, wait`).
+A gravação usa as rotas do Helper `/macro/record/*` (hook global do Windows).
 
 ### Dados do usuário
 

@@ -1,18 +1,31 @@
 // Utilitários de teste: fetch simulado por URL e geradores de payload.
-export type Route = string | (() => Promise<Response> | Response) | { status: number; body?: string };
+export type Route =
+  | string
+  | ((init?: RequestInit) => Promise<Response> | Response)
+  | { status: number; body?: string; type?: string };
 
 export function mockFetch(routes: Record<string, Route>) {
   const calls: string[] = [];
-  const fn = (async (input: RequestInfo | URL) => {
+  const modes: Array<[string, string]> = [];
+  const fn = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     calls.push(url);
+    modes.push([url, init?.mode ?? '']);
     const r = routes[url];
     if (r === undefined) throw new TypeError('Failed to fetch');
-    if (typeof r === 'function') return r();
-    if (typeof r === 'string') return new Response(r, { status: 200 });
-    return new Response(r.body ?? '', { status: r.status });
+    if (typeof r === 'function') return r(init);
+    if (typeof r === 'string') return new Response(r, { status: 200, headers: { 'content-type': 'text/plain' } });
+    return new Response(r.body ?? '', { status: r.status, headers: { 'content-type': r.type ?? 'text/plain' } });
   }) as typeof fetch;
-  return { fn, calls };
+  return { fn, calls, modes };
+}
+
+/** Simula um servidor sem CORS: o fetch normal falha, a sonda no-cors responde (opaca). */
+export function corsBlocked(): Route {
+  return (init?: RequestInit) => {
+    if (init?.mode === 'no-cors') return new Response(null, { status: 200 });
+    throw new TypeError('Failed to fetch');
+  };
 }
 
 export const V_OLD = 'version-02c37bc51a384b8f';

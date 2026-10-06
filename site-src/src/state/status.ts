@@ -30,24 +30,32 @@ export function robloxStatus(helper: HelperStatus | null): StatusInfo {
   return { tone: 'warn', label: 'Não foi possível identificar a versão do Roblox', detail: det?.reason || 'Não foi possível identificar a versão do Roblox.' };
 }
 
+/** Causa curta da última falha (vem do diagnóstico real da requisição). */
+export function failureCause(o: OffsetState): string {
+  const d = o.diagnostic;
+  if (!d || d.ok) return '';
+  return d.message.replace(/\.$/, '');
+}
+
 export function offsetStatus(o: OffsetState): StatusInfo {
   const v = o.dataset?.version;
+  const cause = failureCause(o);
   switch (o.status) {
     case 'loading':
       return { tone: 'busy', label: 'Carregando offsets…', detail: 'Preparando os dados do site.' };
     case 'checking':
-      return { tone: 'busy', label: 'Verificando versão…', detail: v ? `Usando ${v} enquanto verifica a versão LIVE.` : 'Consultando a versão LIVE publicada.' };
+      return { tone: 'busy', label: 'Verificando versão LIVE…', detail: v ? `Consultando o serviço. Até confirmar, o dataset ${v} NÃO é considerado atual.` : 'Consultando a versão LIVE publicada.' };
     case 'updating':
-      return { tone: 'busy', label: 'Atualizando offsets...', detail: `Baixando os offsets de ${o.liveVersion}.` };
+      return { tone: 'busy', label: 'Atualizando offsets...', detail: `Versão LIVE ${o.liveVersion} verificada. Baixando e validando os offsets.` };
     case 'ready':
-      return { tone: 'ok', label: 'Atualizados', detail: `Offsets de ${v}, a versão LIVE atual.` };
+      return { tone: 'ok', label: '✓ Versão LIVE verificada', detail: `${v} · Offsets atualizados.` };
     case 'outdated':
-      return { tone: 'warn', label: 'Não foi possível atualizar os offsets.', detail: `Os dados atuais (${v}) foram mantidos para evitar uma configuração inválida.` };
+      return { tone: 'warn', label: '⚠ Offsets desatualizados', detail: `Versão LIVE ${o.liveVersion} verificada, mas não foi possível atualizar os offsets${cause ? ` (${cause})` : ''}. Os dados atuais (${v}) foram mantidos para evitar uma configuração inválida — eles NÃO são da versão atual.` };
     case 'offline':
-      return { tone: 'warn', label: 'Versão LIVE não verificada', detail: `Sem resposta do serviço de versão. Usando o último dataset válido (${v}).` };
+      return { tone: 'warn', label: '⚠ Versão LIVE não verificada', detail: `Não foi possível consultar o serviço${cause ? ` (${cause})` : ''}. Usando o último dataset válido: ${v} — a versão atual não foi confirmada.` };
     case 'unavailable':
     default:
-      return { tone: 'err', label: 'Não foi possível carregar os offsets.', detail: 'As funções que dependem deles estão indisponíveis.' };
+      return { tone: 'err', label: '✕ Não foi possível carregar os offsets', detail: `As funções que dependem deles estão indisponíveis.${cause ? ` Causa: ${cause}.` : ''}` };
   }
 }
 

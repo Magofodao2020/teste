@@ -3,8 +3,9 @@
 
 import { useSyncExternalStore } from 'react';
 import {
-  type ActionsState, defaultActionsState, restoreActionsState, setEnabled, setTrigger, toHelperMacro,
-} from '../core/actions';
+  type Macro, type MacrosState, TEMPLATES, defaultMacrosState, duplicateMacro, fromTemplate, newMacroId, removeMacro,
+  restoreMacrosState, setAllEnabled, setEnabled, toHelperMacro, upsertMacro,
+} from '../core/macros';
 import { type FlagValue, toHelperValue } from '../core/flags';
 import { HelperClient, type HelperResult, type HelperStatus } from '../core/helper/client';
 import { buildIndex, type DatasetIndex } from '../core/offsets/dataset';
@@ -14,7 +15,7 @@ import {
   normalizePreset, removeInvalidFlags, sanitizeHotkeys, uniqueName,
 } from '../core/presets';
 import { type KV, openStorage } from '../core/storage/db';
-import { KEYS, loadPrefs, migrateLegacyLocalStorage, readJson, savePrefs, writeJson } from '../core/storage/local';
+import { KEYS, loadPrefs, migrateLegacyLocalStorage, readJson, removeKey, savePrefs, writeJson } from '../core/storage/local';
 
 export type ToastKind = 'success' | 'error' | 'info';
 export interface Toast { id: number; kind: ToastKind; text: string }
@@ -30,7 +31,7 @@ export interface AppState {
   presets: Preset[];
   activePresetId: string | null;
   hotkeys: HotkeyMap;
-  actions: ActionsState;
+  macros: MacrosState;
   sidebarCollapsed: boolean;
   toasts: Toast[];
   busy: Partial<Record<'apply' | 'pause' | 'resume', boolean>>;
@@ -61,9 +62,9 @@ export class AppStore {
     const prefs = typeof localStorage !== 'undefined' ? loadPrefs() : { activePresetId: null, sidebarCollapsed: false };
     this.state = {
       ready: false, bootError: null, storagePersistent: true,
-      offsets: { status: 'loading', liveVersion: null, liveCheckedAt: null, dataset: null, source: null, lastSyncAt: null, error: null },
+      offsets: { status: 'loading', liveVersion: null, liveCheckedAt: null, dataset: null, source: null, lastSyncAt: null, error: null, diagnostic: null },
       index: null, helper: null, helperChecked: false,
-      presets: [], activePresetId: prefs.activePresetId, hotkeys: {}, actions: defaultActionsState(),
+      presets: [], activePresetId: prefs.activePresetId, hotkeys: {}, macros: defaultMacrosState(),
       sidebarCollapsed: prefs.sidebarCollapsed, toasts: [], busy: {},
     };
   }
@@ -91,7 +92,7 @@ export class AppStore {
       this.set({
         ready: true, storagePersistent: storage.persistent, presets, activePresetId,
         hotkeys: sanitizeHotkeys(readJson(KEYS.hotkeys)),
-        actions: restoreActionsState(readJson(KEYS.actions)),
+        macros: this.loadMacros(),
       });
       this.savePrefs();
       const service = new OffsetService({ fetch: this.deps.fetch, storage, siteBase: this.deps.base });
@@ -213,8 +214,8 @@ export class AppStore {
 
   private async pushMacros() {
     if (!this.state.helper) return;
-    const a = this.state.actions;
-    await this.helper.setMacros(a.actions.map(toHelperMacro), { stopKey: a.stopKey });
+    const a = this.state.macros;
+    await this.helper.setMacros(a.macros.map(toHelperMacro), { stopKey: a.stopKey });
   }
 
   private async pushHotkeys() {
@@ -258,12 +259,12 @@ export class AppStore {
   pauseAll() { return this.live('pause'); }
   resumeAll() { return this.live('resume'); }
 
-  async testAction(id: string) {
-    const a = this.state.actions.actions.find((x) => x.id === id);
-    if (!a) return;
+  /** Roda a macro uma vez em 3 s (também macros ainda não salvas, do editor). */
+  async testMacro(m: Macro) {
+    if (!m.steps.length) { this.toast('error', 'A ação não tem etapas.'); return; }
     if (!(await this.pollHelper())) { this.toast('error', 'Helper local não está rodando.'); return; }
-    const r = await this.helper.runMacro({ ...toHelperMacro(a), id: '__test__', robloxOnly: false }, 3000);
-    this.toast(r.ok ? 'info' : 'error', r.ok ? `"${a.macro.name}" roda em 3 s — vá para o jogo.` : r.message);
+    const r = await this.helper.runMacro({ ...toHelperMacro(m), id: '__test__', robloxOnly: false, enabled: true }, 3000);
+    this.toast(r.ok ? 'info' : 'error', r.ok ? `"${m.name}" roda em 3 s — vá para o jogo.` : r.message);
   }
 
   async stopActions() {
@@ -378,17 +379,70 @@ export class AppStore {
 
   // ───────── ações ─────────
 
-  private saveActions(actions: ActionsState) {
-    this.set({ actions });
-    writeJson(KEYS.actions, actions);
+  /** Estado salvo (v3) ou migrado da versão anterior/site antigo — nunca com ações ativadas sozinhas. */
+  private loadMacros(): MacrosState {
+    const st = restoreMacrosState(readJson(KEYS.macros), readJson(KEYS.macrosV2), readJson(KEYS.macrosV1));
+    writeJson(KEYS.macros, st);
+    removeKey(KEYS.macrosV2);
+    removeKey(KEYS.macrosV1);
+    return st;
+  }
+
+  private saveMacros(macros: MacrosState) {
+    this.set({ macros });
+    writeJson(KEYS.macros, macros);
     this.queue(() => this.pushMacros());
   }
-  setActionEnabled(id: string, enabled: boolean) { this.saveActions(setEnabled(this.state.actions, id, enabled)); }
-  setActionTrigger(id: string, trigger: string | null) { this.saveActions(setTrigger(this.state.actions, id, trigger)); }
-  setStopKey(code: string) { this.saveActions({ ...this.state.actions, stopKey: code }); }
-  resetActions() {
-    this.saveActions(defaultActionsState());
-    this.toast('success', 'Ações restauradas para a configuração padrão.');
+  setMacroEnabled(id: string, enabled: boolean) {
+    const m = this.state.macros.macros.find((x) => x.id === id);
+    if (enabled && m && (!m.trigger || !m.steps.length)) {
+      this.toast('error', !m.trigger ? `Defina um botão para "${m.name}" antes de ativar.` : `"${m.name}" não tem etapas.`);
+      return;
+    }
+    this.saveMacros(setEnabled(this.state.macros, id, enabled));
+  }
+  setAllMacrosEnabled(enabled: boolean) {
+    const next = setAllEnabled(this.state.macros, enabled);
+    this.saveMacros(next);
+    if (enabled) {
+      const skipped = next.macros.filter((m) => !m.enabled).length;
+      if (skipped) this.toast('info', `${skipped} ${skipped === 1 ? 'ação sem botão ou sem etapas não foi ativada' : 'ações sem botão ou sem etapas não foram ativadas'}.`);
+    }
+  }
+  setMacroTrigger(id: string, trigger: string | null) {
+    const m = this.state.macros.macros.find((x) => x.id === id);
+    if (m) this.saveMacros(upsertMacro(this.state.macros, { ...m, trigger }));
+  }
+  /** Salva (cria ou atualiza). Macros novas entram desativadas. */
+  saveMacro(m: Macro) {
+    const exists = this.state.macros.macros.some((x) => x.id === m.id);
+    this.saveMacros(upsertMacro(this.state.macros, exists ? m : { ...m, enabled: false, createdAt: Date.now() }));
+    this.toast('success', exists ? `"${m.name}" salva.` : `Ação "${m.name}" criada · Status: desativada.`);
+  }
+  deleteMacro(id: string) { this.saveMacros(removeMacro(this.state.macros, id)); }
+  duplicateMacro(id: string) {
+    const r = duplicateMacro(this.state.macros, id);
+    if (r.copy) { this.saveMacros(r.state); this.toast('success', `"${r.copy.name}" criada · Status: desativada.`); }
+  }
+  addTemplate(templateId: string) {
+    const t = TEMPLATES.find((x) => x.id === templateId);
+    if (!t) return;
+    const id = this.state.macros.macros.some((m) => m.id === t.id) ? newMacroId() : t.id;
+    this.saveMacros(upsertMacro(this.state.macros, fromTemplate(t, id)));
+    this.toast('success', `Modelo "${t.pack.name}" adicionado · Status: desativada.`);
+  }
+  importMacros(list: Macro[]) {
+    let st = this.state.macros;
+    for (const m of list) st = upsertMacro(st, { ...m, enabled: false });
+    this.saveMacros(st);
+    this.toast('success', `${list.length} ${list.length === 1 ? 'ação importada' : 'ações importadas'} · desativadas.`);
+  }
+  setStopKey(code: string) { this.saveMacros({ ...this.state.macros, stopKey: code }); }
+
+  async pickCursor(delayMs: number) {
+    const r = await this.helper.pickCursor(delayMs);
+    if (!r.ok) this.toast('error', r.message);
+    return r.ok ? { x: Number(r.x), y: Number(r.y) } : null;
   }
 
   // ───────── interface ─────────

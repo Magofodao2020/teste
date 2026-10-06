@@ -1,113 +1,162 @@
-import { Info, Play, RotateCcw, Square, Timer } from 'lucide-react';
+import {
+  Circle, Copy, Crosshair, Download, LayoutTemplate, Pencil, Play, Plus, Power, PowerOff, Square, Trash2, TriangleAlert, Upload,
+} from 'lucide-react';
 import { useState } from 'react';
 import {
-  ACTION_GROUPS, type Action, describeStep, sharedTrigger, triggerLabel,
-} from '../core/actions';
+  type Macro, type MacroStep, MODES, activeConflicts, canActivate, describeStep, macroMs, newMacroId, triggerLabel,
+} from '../core/macros';
 import { store, useApp } from '../state/store';
 import {
-  Button, Card, Confirm, KeyCapture, Notice, Switch,
+  Button, Card, Confirm, Empty, KeyCapture, Notice,
 } from '../ui/components';
+import { MacroEditor } from './MacroEditor';
+import { ExportMacrosDialog, ImportMacrosDialog, RecorderDialog, TemplatesDialog } from './MacroDialogs';
 
-function durationMs(a: Action) {
-  let ms = 0;
-  for (const s of a.macro.steps) {
-    const n = (k: string) => Number(s[k] ?? 0);
-    if (s.t === 'flick') ms += n('pre') + n('hold') + n('afterUp') + n('moveDur') + n('afterMove') + n('cooldown');
-    else if (s.t === 'key') ms += Math.max(1, n('n')) * n('hold') + (Math.max(1, n('n')) - 1) * n('gap');
-    else if (s.t === 'wait') ms += n('ms');
-  }
-  return Math.round(ms / (a.macro.speed || 1));
-}
+type Editing = { macro: Macro; isNew: boolean } | null;
+type Dialog = { kind: 'record' } | { kind: 'import' } | { kind: 'templates' } | { kind: 'export'; macros: Macro[] } | { kind: 'delete'; macro: Macro } | null;
 
-function ActionCard({ action }: { action: Action }) {
-  const actionsState = useApp((s) => s.actions);
-  const helper = useApp((s) => s.helper);
-  const shared = sharedTrigger(actionsState, action.id);
-  const activeOther = shared.find((a) => a.enabled);
-  return (
-    <article className={`action ${action.enabled ? 'on' : ''}`} aria-label={action.macro.name}>
-      <div className="action-head">
-        <Switch checked={action.enabled} onChange={(v) => store.setActionEnabled(action.id, v)} label={`Ativar ${action.macro.name}`} />
-        <div className="action-title">
-          <span className="action-name">{action.macro.name}</span>
-          <span className="faint" style={{ fontSize: 12 }}>{action.enabled ? 'Ativa' : 'Inativa'} · só com o Roblox em foco</span>
-        </div>
-        <KeyCapture value={action.trigger} onChange={(code) => store.setActionTrigger(action.id, code)} label={`Botão de ${action.macro.name}`} />
-      </div>
-      <ol className="steps">
-        {action.macro.steps.map((s, i) => (
-          <li key={i}><span>{i + 1}.</span><span>{describeStep(s)}</span></li>
-        ))}
-      </ol>
-      <div className="row wrap" style={{ justifyContent: 'space-between' }}>
-        <span className="faint row" style={{ gap: 6, fontSize: 12 }}><Timer size={14} /> {durationMs(action) ? `~${durationMs(action)} ms por execução` : 'Teclas em sequência imediata'}</span>
-        <Button size="sm" icon={<Play />} disabled={!helper} onClick={() => void store.testAction(action.id)} title={helper ? 'Roda uma vez em 3 segundos' : 'Helper desconectado'}>
-          Testar (3 s)
-        </Button>
-      </div>
-      {shared.length > 0 && (
-        <div className="faint row" style={{ gap: 8, fontSize: 12, alignItems: 'flex-start' }}>
-          <Info size={14} style={{ flex: 'none', marginTop: 2 }} />
-          <span>
-            Divide o botão <strong style={{ color: 'var(--text-2)' }}>{triggerLabel(action.trigger)}</strong> com {shared.map((a) => a.macro.name).join(', ')}.
-            {action.enabled ? ' Ativar a outra desativa esta.' : activeOther ? ` Ativar esta desativa ${activeOther.macro.name}.` : ''}
-          </span>
-        </div>
-      )}
-    </article>
-  );
+function blankMacro(steps: MacroStep[] = [], name = 'Nova ação'): Macro {
+  const now = Date.now();
+  return { id: newMacroId(), name, enabled: false, trigger: null, mode: 'once', repeat: 1, loopDelay: 0, speed: 1, robloxOnly: true, steps, createdAt: now, updatedAt: now };
 }
 
 export function AcoesPage() {
-  const actions = useApp((s) => s.actions);
+  const state = useApp((s) => s.macros);
   const helper = useApp((s) => s.helper);
-  const [confirmReset, setConfirmReset] = useState(false);
-  const enabledCount = actions.actions.filter((a) => a.enabled).length;
+  const [editing, setEditing] = useState<Editing>(null);
+  const [dialog, setDialog] = useState<Dialog>(null);
+  const close = () => setDialog(null);
+
+  if (editing) return <MacroEditor initial={editing.macro} isNew={editing.isNew} onClose={() => setEditing(null)} />;
+
+  const total = state.macros.length;
+  const active = state.macros.filter((m) => m.enabled).length;
+  const activatable = state.macros.filter(canActivate).length;
+  const allActive = activatable > 0 && state.macros.filter(canActivate).every((m) => m.enabled);
 
   return (
     <div className="page">
       {!helper && (
         <Notice tone="warn"><strong>Helper desconectado.</strong> As ações são executadas pelo Helper local. Abra o help.bat e deixe a janela aberta; a configuração é enviada automaticamente.</Notice>
       )}
-      <Notice>
-        Cada botão do mouse dispara <strong>no máximo uma ação ativa</strong> (duas no mesmo botão rodariam juntas).
-        Clique no botão de uma ação para trocá-lo. Os passos seguem exatamente a configuração do BOPE.
-      </Notice>
 
-      {ACTION_GROUPS.map((g) => (
-        <section key={g} className="col" style={{ gap: 12 }}>
-          <div className="row" style={{ justifyContent: 'space-between' }}>
-            <div className="eyebrow">{g}</div>
-            <span className="faint" style={{ fontSize: 12 }}>
-              {actions.actions.filter((a) => a.group === g && a.enabled).length} de {actions.actions.filter((a) => a.group === g).length} ativas
-            </span>
+      <Card>
+        <div className="row wrap" style={{ justifyContent: 'space-between', gap: 16 }}>
+          <div className="col" style={{ gap: 2 }}>
+            <div className="eyebrow">Ações</div>
+            <div className="row" style={{ gap: 14, alignItems: 'baseline' }}>
+              <span aria-live="polite"><strong style={{ fontSize: 20 }}>{active}</strong> <span className="muted">{active === 1 ? 'ativa' : 'ativas'}</span></span>
+              <span><strong style={{ fontSize: 20 }}>{total - active}</strong> <span className="muted">{total - active === 1 ? 'desativada' : 'desativadas'}</span></span>
+            </div>
           </div>
-          <div className="grid grid-2">
-            {actions.actions.filter((a) => a.group === g).map((a) => <ActionCard key={a.id} action={a} />)}
+          <div className="row wrap">
+            <Button variant={allActive ? 'default' : 'primary'} icon={<Power />} disabled={!activatable || allActive} onClick={() => store.setAllMacrosEnabled(true)}>Ativar todas</Button>
+            <Button icon={<PowerOff />} disabled={active === 0} onClick={() => store.setAllMacrosEnabled(false)}>Desativar todas</Button>
           </div>
-        </section>
-      ))}
+        </div>
+        <div className="divider" style={{ margin: '16px 0' }} />
+        <div className="row wrap">
+          <Button variant="primary" icon={<Plus />} onClick={() => setEditing({ macro: blankMacro(), isNew: true })}>Criar ação</Button>
+          <Button icon={<Circle />} onClick={() => setDialog({ kind: 'record' })}>Gravar macro</Button>
+          <Button variant="ghost" icon={<LayoutTemplate />} onClick={() => setDialog({ kind: 'templates' })}>Modelos</Button>
+          <Button variant="ghost" icon={<Upload />} onClick={() => setDialog({ kind: 'import' })}>Importar</Button>
+          <Button variant="ghost" icon={<Download />} disabled={!total} onClick={() => setDialog({ kind: 'export', macros: state.macros })}>Exportar todas</Button>
+        </div>
+      </Card>
+
+      <section className="col" style={{ gap: 12 }}>
+        <div className="eyebrow">Minhas ações</div>
+        {total === 0 ? (
+          <Card>
+            <Empty icon={<Crosshair />} title="Nenhuma ação">Crie uma ação, grave uma macro ou adicione um dos modelos (Bug Indi, Perfect Dive, Gagatech…).</Empty>
+          </Card>
+        ) : (
+          <div className="col" style={{ gap: 10 }}>
+            {state.macros.map((m) => (
+              <MacroRow
+                key={m.id}
+                m={m}
+                conflicts={activeConflicts(state, m)}
+                helperOn={!!helper}
+                onEdit={() => setEditing({ macro: m, isNew: false })}
+                onExport={() => setDialog({ kind: 'export', macros: [m] })}
+                onDelete={() => setDialog({ kind: 'delete', macro: m })}
+              />
+            ))}
+          </div>
+        )}
+      </section>
 
       <Card title="Controle" icon={<Square size={18} />}>
         <div className="row wrap" style={{ justifyContent: 'space-between', gap: 16 }}>
           <div className="row wrap" style={{ gap: 12 }}>
             <span className="field-label">Tecla de parada</span>
-            <KeyCapture value={actions.stopKey} onChange={(c) => store.setStopKey(c)} allowScroll={false} label="Tecla de parada" />
-            <span className="faint" style={{ fontSize: 12.5 }}>Para todas as ações em andamento.</span>
+            <KeyCapture value={state.stopKey} onChange={(c) => store.setStopKey(c)} allowScroll={false} label="Tecla de parada" />
+            <span className="faint" style={{ fontSize: 12.5 }}>Para todas as ações em andamento e encerra a gravação.</span>
           </div>
-          <div className="row wrap">
-            <Button icon={<Square />} disabled={!helper} onClick={() => void store.stopActions()}>Parar tudo agora</Button>
-            <Button variant="ghost" icon={<RotateCcw />} onClick={() => setConfirmReset(true)}>Restaurar padrão</Button>
-          </div>
+          <Button icon={<Square />} disabled={!helper} onClick={() => void store.stopActions()}>Parar tudo agora</Button>
         </div>
-        <p className="faint" style={{ margin: '12px 0 0', fontSize: 12.5 }}>{enabledCount} de {actions.actions.length} ações ativas.</p>
       </Card>
 
-      {confirmReset && (
-        <Confirm title="Restaurar ações" confirmLabel="Restaurar padrão" onConfirm={() => store.resetActions()} onClose={() => setConfirmReset(false)}>
-          <p style={{ margin: 0 }}>Volta os botões e o estado (ativa/inativa) das cinco ações para o padrão. Os passos das ações não mudam.</p>
+      {dialog?.kind === 'record' && (
+        <RecorderDialog
+          onClose={close}
+          onRecorded={(steps) => {
+            close();
+            const t = new Date();
+            setEditing({ macro: blankMacro(steps, `Gravação ${t.toLocaleDateString('pt-BR')} ${t.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`), isNew: true });
+            store.toast('info', `Gravação com ${steps.length} etapas. Revise e salve.`);
+          }}
+        />
+      )}
+      {dialog?.kind === 'import' && <ImportMacrosDialog onClose={close} />}
+      {dialog?.kind === 'templates' && <TemplatesDialog onClose={close} />}
+      {dialog?.kind === 'export' && <ExportMacrosDialog macros={dialog.macros} onClose={close} />}
+      {dialog?.kind === 'delete' && (
+        <Confirm title="Excluir ação" danger confirmLabel="Excluir" onConfirm={() => store.deleteMacro(dialog.macro.id)} onClose={close}>
+          <p style={{ margin: 0 }}>Excluir <strong>{dialog.macro.name}</strong>? Não dá para desfazer (os modelos podem ser adicionados de novo em “Modelos”).</p>
         </Confirm>
       )}
     </div>
+  );
+}
+
+function MacroRow({ m, conflicts, helperOn, onEdit, onExport, onDelete }: {
+  m: Macro; conflicts: Macro[]; helperOn: boolean; onEdit: () => void; onExport: () => void; onDelete: () => void;
+}) {
+  const mode = MODES.find(([v]) => v === m.mode)?.[1] ?? m.mode;
+  const ready = canActivate(m);
+  return (
+    <article className={`macro-row ${m.enabled ? 'on' : ''}`} aria-label={m.name}>
+      <div className="macro-main">
+        <span className={`status-pill ${m.enabled ? 'on' : 'off'}`} aria-label={m.enabled ? 'Ativa' : 'Desativada'}>{m.enabled ? '● Ativa' : '○ Desativada'}</span>
+        <div className="col" style={{ gap: 2, minWidth: 0, flex: '1 1 200px' }}>
+          <span className="row" style={{ gap: 8, minWidth: 0 }}>
+            <strong className="macro-name">{m.name}</strong>
+            {m.group && <span className="tag gold">{m.group}</span>}
+          </span>
+          <span className="faint truncate" style={{ fontSize: 12 }} title={m.steps.map(describeStep).join('\n')}>
+            {mode}{m.mode === 'once' && m.repeat > 1 ? ` ×${m.repeat}` : ''} · {m.steps.length} {m.steps.length === 1 ? 'etapa' : 'etapas'} · ~{macroMs(m)} ms{m.robloxOnly ? ' · só no Roblox' : ''}
+          </span>
+        </div>
+        <KeyCapture value={m.trigger} onChange={(c) => store.setMacroTrigger(m.id, c)} label={`Botão de ${m.name}`} />
+      </div>
+      <div className="macro-actions">
+        {m.enabled
+          ? <Button size="sm" icon={<PowerOff />} onClick={() => store.setMacroEnabled(m.id, false)}>Desativar</Button>
+          : <Button size="sm" variant="primary" icon={<Power />} disabled={!ready} title={ready ? undefined : 'Defina um botão e pelo menos uma etapa'} onClick={() => store.setMacroEnabled(m.id, true)}>Ativar</Button>}
+        <Button size="sm" icon={<Pencil />} onClick={onEdit}>Editar</Button>
+        <Button size="sm" variant="ghost" icon={<Play />} disabled={!helperOn || !m.steps.length} onClick={() => void store.testMacro(m)} title="Roda uma vez em 3 segundos">Testar</Button>
+        <Button size="sm" variant="ghost" icon={<Copy />} onClick={() => store.duplicateMacro(m.id)} aria-label={`Duplicar ${m.name}`} title="Duplicar" />
+        <Button size="sm" variant="ghost" icon={<Download />} onClick={onExport} aria-label={`Exportar ${m.name}`} title="Exportar" />
+        <Button size="sm" variant="ghost" icon={<Trash2 />} onClick={onDelete} aria-label={`Excluir ${m.name}`} title="Excluir" />
+      </div>
+      {!m.trigger && <span className="faint" style={{ fontSize: 12 }}>Sem botão definido: não pode ser ativada.</span>}
+      {m.enabled && conflicts.length > 0 && (
+        <span className="row" style={{ gap: 6, fontSize: 12, color: '#fcd34d' }}>
+          <TriangleAlert size={14} /> Mesmo botão ({triggerLabel(m.trigger)}) de {conflicts.map((c) => c.name).join(', ')}: as ações ativas rodam juntas.
+        </span>
+      )}
+    </article>
   );
 }

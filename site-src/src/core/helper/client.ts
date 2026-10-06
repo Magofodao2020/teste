@@ -28,6 +28,14 @@ export interface HelperStatus {
   canApply: boolean;
 }
 
+export interface RecordStatus {
+  state: 'idle' | 'countdown' | 'recording' | 'done';
+  events: number;
+  elapsedMs: number;
+  stopKey: string;
+  steps: unknown[] | null;
+}
+
 export interface HelperResult {
   ok: boolean;
   message: string;
@@ -109,5 +117,23 @@ export class HelperClient {
   pause(flags: Record<string, string>, dumpVersion: string) { return this.post('/pause', { flags, dumpVersion }); }
   resume(flags: Record<string, string>, dumpVersion: string) { return this.post('/resume', { flags, dumpVersion }); }
   runMacro(macro: unknown, countdown: number) { return this.post('/macro/run', { macro, countdown }); }
+  recordStart(opts: { moves: 'path' | 'clicks' | 'none'; coords: 'abs' | 'rel'; countdown: number; sampleMs?: number }) {
+    return this.post('/macro/record/start', opts);
+  }
+  recordStop() { return this.post('/macro/record/stop', {}); }
+  pickCursor(delay: number) { return this.post('/macro/cursor', { delay }, delay + POST_TIMEOUT_MS); }
+
+  async recordStatus(): Promise<RecordStatus | null> {
+    if (!this.port) return null;
+    try {
+      const res = await this.request(`http://127.0.0.1:${this.port}/macro/record/status`, { method: 'GET' }, PROBE_TIMEOUT_MS * 2);
+      const d = (await res.json()) as Record<string, unknown>;
+      const state = String(d.state ?? 'idle') as RecordStatus['state'];
+      const result = d.result && typeof d.result === 'object' ? (d.result as { steps?: unknown[] }) : null;
+      return { state, events: Number(d.events) || 0, elapsedMs: Number(d.elapsedMs) || 0, stopKey: String(d.stopKey ?? 'F8'), steps: Array.isArray(result?.steps) ? result!.steps : null };
+    } catch {
+      return null;
+    }
+  }
   stopMacros() { return this.post('/macro/stop', {}); }
 }

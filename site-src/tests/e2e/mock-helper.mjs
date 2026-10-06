@@ -5,6 +5,7 @@ import http from 'node:http';
 export function startMockHelper({ port = 7962, running = 'version-cec3ad5889b447cf' } = {}) {
   const state = {
     running, startedAt: Date.now(), offsets: null, macros: null, settings: null, hotkeys: null, posts: [],
+    rec: { state: 'idle', events: 0, startedAt: 0, timer: null, result: null },
   };
   const status = () => ({
     ok: true, helper: 'gerenciador-helper', helperVersion: '2.3.0', platform: 'win32', ffiReady: true,
@@ -22,7 +23,15 @@ export function startMockHelper({ port = 7962, running = 'version-cec3ad5889b447
     };
     if (req.method === 'OPTIONS') return send({});
     const path = req.url.split('?')[0];
-    if (req.method === 'GET') return path === '/status' ? send(status()) : send({ ok: false });
+    if (req.method === 'GET') {
+      if (path === '/status') return send(status());
+      if (path === '/macro/record/status') {
+        const r = state.rec;
+        if (r.state === 'recording') r.events += 3;
+        return send({ ok: true, state: r.state, events: r.events, elapsedMs: r.state === 'recording' ? Date.now() - r.startedAt : 0, stopKey: state.settings?.stopKey ?? 'F8', result: r.state === 'done' ? r.result : null });
+      }
+      return send({ ok: false });
+    }
     let body = '';
     req.on('data', (c) => { body += c; });
     req.on('end', () => {
@@ -43,6 +52,22 @@ export function startMockHelper({ port = 7962, running = 'version-cec3ad5889b447
           return send({ ok: true, applied: n, message: `Todas as ${n} configurações aplicadas na memória.` });
         }
         case '/macro/run': return send({ ok: true, message: 'rodando' });
+        case '/macro/record/start': {
+          const r = state.rec;
+          Object.assign(r, { state: 'countdown', events: 0, result: null, opts: data });
+          r.timer = setTimeout(() => { r.state = 'recording'; r.startedAt = Date.now(); }, 300);
+          return send({ ok: true, message: 'Gravação agendada.', stopKey: state.settings?.stopKey ?? 'F8' });
+        }
+        case '/macro/record/stop': {
+          const r = state.rec;
+          clearTimeout(r.timer);
+          if (r.state === 'countdown') { r.state = 'idle'; return send({ ok: true, cancelled: true, message: 'Gravação cancelada.' }); }
+          if (r.state !== 'recording') return send({ ok: false, message: 'Não há gravação em andamento.' });
+          r.result = { steps: [{ t: 'key', code: 'KeyE', hold: 55 }, { t: 'click', btn: 'left', hold: 32, delay: 140 }, { t: 'scroll', amount: -2, delay: 80 }], events: r.events, durationMs: 900 };
+          r.state = 'done';
+          return send({ ok: true, ...r.result });
+        }
+        case '/macro/cursor': return send({ ok: true, x: 640, y: 360 });
         case '/macro/stop': return send({ ok: true, stopped: 0, message: 'Nenhum macro rodando.' });
         case '/pause': return send({ ok: true, message: 'Configurações despausadas.' });
         case '/resume': return send({ ok: true, message: 'Aplicado.' });

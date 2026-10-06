@@ -4,7 +4,9 @@
 
 export const KEYS = {
   prefs: 'bope:prefs:v2',
-  actions: 'bope:acoes:v2',
+  macros: 'bope:acoes:v3',
+  macrosV2: 'bope:acoes:v2',
+  macrosV1: 'gerenciador:macros:v1',
   hotkeys: 'gerenciador:hotkeys:v1',
 } as const;
 
@@ -12,7 +14,6 @@ export const KEYS = {
 // manualmente (activeDumpId/clientVersion) — removida junto com o seletor.
 const LEGACY = {
   prefs: ['gerenciador:prefs:v1', 'fflag-manager:prefs:v1'],
-  macros: ['gerenciador:macros:v1'],
   hotkeys: ['fflag-manager:hotkeys:v1'],
 };
 
@@ -34,7 +35,7 @@ export function writeJson(key: string, value: unknown): boolean {
   }
 }
 
-function remove(key: string) {
+export function removeKey(key: string) {
   try { localStorage.removeItem(key); } catch { /* bloqueado */ }
 }
 
@@ -59,8 +60,8 @@ export function savePrefs(p: Prefs) {
  * Migra as chaves do site antigo (uma vez, idempotente):
  *  - preset ativo → bope:prefs:v2 (sem a versão selecionada manualmente)
  *  - hotkeys de flags antigas (fflag-manager) → gerenciador:hotkeys:v1
- *  - macros antigos (incluindo o AHK Flick) são descartados: as ações agora
- *    são as cinco definidas em core/actions/defaults.ts
+ *  - macros antigos: migrados pelo store (core/macros.ts: restoreMacrosState),
+ *    sem o AHK Flick e todos desativados
  */
 export function migrateLegacyLocalStorage() {
   if (readJson(KEYS.prefs) == null) {
@@ -78,5 +79,5 @@ export function migrateLegacyLocalStorage() {
       if (old && typeof old === 'object') { writeJson(KEYS.hotkeys, old); break; }
     }
   }
-  for (const key of [...LEGACY.prefs, ...LEGACY.macros, ...LEGACY.hotkeys]) remove(key);
+  for (const key of [...LEGACY.prefs, ...LEGACY.hotkeys]) removeKey(key);
 }

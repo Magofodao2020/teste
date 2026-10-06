@@ -4,7 +4,7 @@ import {
 import {
   type ButtonHTMLAttributes, type ReactNode, useEffect, useRef, useState,
 } from 'react';
-import { triggerLabel } from '../core/actions';
+import { triggerLabel } from '../core/macros';
 import { store, useApp } from '../state/store';
 import logoUrl from './bope.png';
 
@@ -122,8 +122,8 @@ export function isMouseCode(code: string | null | undefined) {
  * Captura uma tecla ou botão do mouse (inclusive laterais e scroll) no formato
  * que o Helper entende (KeyboardEvent.code / MouseBack / ScrollUp…). Esc cancela.
  */
-export function KeyCapture({ value, onChange, allowScroll = true, placeholder = 'Definir botão', label }: {
-  value: string | null; onChange: (code: string) => void; allowScroll?: boolean; placeholder?: string; label: string;
+export function KeyCapture({ value, onChange, allowScroll = true, keyboardOnly = false, placeholder = 'Definir botão', label }: {
+  value: string | null; onChange: (code: string) => void; allowScroll?: boolean; keyboardOnly?: boolean; placeholder?: string; label: string;
 }) {
   const [capturing, setCapturing] = useState(false);
   const onChangeRef = useRef(onChange);
@@ -142,13 +142,13 @@ export function KeyCapture({ value, onChange, allowScroll = true, placeholder = 
       else if (e.code) finish(e.code);
     };
     const onMouse = (e: MouseEvent) => {
-      if (!armed) return;
+      if (!armed || keyboardOnly) return;
       e.preventDefault(); e.stopPropagation();
       const code = MOUSE_BUTTONS[e.button];
       if (code) finish(code);
     };
     const onWheel = (e: WheelEvent) => {
-      if (!armed || !allowScroll || !e.deltaY) return;
+      if (!armed || keyboardOnly || !allowScroll || !e.deltaY) return;
       e.preventDefault();
       finish(e.deltaY < 0 ? 'ScrollUp' : 'ScrollDown');
     };
@@ -164,7 +164,7 @@ export function KeyCapture({ value, onChange, allowScroll = true, placeholder = 
       window.removeEventListener('wheel', onWheel, true);
       window.removeEventListener('contextmenu', block, true);
     };
-  }, [capturing, allowScroll]);
+  }, [capturing, allowScroll, keyboardOnly]);
 
   const Icon = isMouseCode(value) ? Mouse : Keyboard;
   return (

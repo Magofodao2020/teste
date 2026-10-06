@@ -3,7 +3,7 @@ import {
   Search, Sparkles, Trash2, Upload, X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { triggerLabel } from '../core/actions';
+import { triggerLabel } from '../core/macros';
 import { type FlagType, type FlagValue, coerceValue, flagType } from '../core/flags';
 import { flagExists } from '../core/offsets/dataset';
 import { type Preset, exportPreset, parseImport, scanInvalidFlags } from '../core/presets';

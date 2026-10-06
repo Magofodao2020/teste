@@ -17,7 +17,7 @@ export type Route = 'painel' | 'acoes' | 'presets' | 'catalogo' | 'config';
 interface NavEntry { id: Route; label: string; subtitle: string; icon: ComponentType; section?: string }
 const NAV: NavEntry[] = [
   { id: 'painel', label: 'Painel', subtitle: 'Visão geral: Helper, Roblox, offsets, ações e presets', icon: LayoutDashboard },
-  { id: 'acoes', label: 'Ações', subtitle: 'Bug Indi e GK — o que cada botão do mouse faz', icon: Crosshair, section: 'Operação' },
+  { id: 'acoes', label: 'Ações', subtitle: 'Crie, grave, edite e ative suas ações e macros', icon: Crosshair, section: 'Operação' },
   { id: 'presets', label: 'Presets', subtitle: 'Flags salvas e aplicação no Roblox', icon: Layers },
   { id: 'catalogo', label: 'Catálogo de flags', subtitle: 'Todas as flags do dump atual', icon: Library },
   { id: 'config', label: 'Configurações', subtitle: 'Helper, offsets e dados do site', icon: Settings, section: 'Sistema' },
@@ -165,7 +165,7 @@ function TopStatus() {
         <span className="chip-label">{robloxChip === c ? (c.tone === 'ok' ? 'Roblox compatível' : c.label) : robloxChip.label}</span>
       </Chip>
       <Chip tone={o.tone === 'ok' ? 'gold' : o.tone} title={`${o.label} ${o.detail}`} onClick={() => navigate('painel')}>
-        <span className="chip-label">Offsets</span>
+        <span className="chip-label">{offsets.status === 'ready' ? 'LIVE ✓' : offsets.status === 'offline' ? 'LIVE não verificada' : offsets.status === 'outdated' ? 'Offsets desatualizados' : 'Offsets'}</span>
         <span className="mono">{shortVersion(offsets.dataset?.version)}</span>
       </Chip>
     </div>

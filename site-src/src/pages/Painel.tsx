@@ -3,7 +3,6 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { navigate } from '../App';
-import { ACTION_GROUPS } from '../core/actions';
 import { type StatusInfo, compatStatus, helperStatus, offsetStatus, robloxStatus } from '../state/status';
 import { store, useApp } from '../state/store';
 import {
@@ -31,7 +30,7 @@ export function PainelPage({ invalidCount }: { invalidCount: number }) {
   const checked = useApp((s) => s.helperChecked);
   const offsets = useApp((s) => s.offsets);
   const index = useApp((s) => s.index);
-  const actions = useApp((s) => s.actions);
+  const macros = useApp((s) => s.macros);
   const presets = useApp((s) => s.presets);
   const activeId = useApp((s) => s.activePresetId);
   const busy = useApp((s) => s.busy);
@@ -42,8 +41,10 @@ export function PainelPage({ invalidCount }: { invalidCount: number }) {
   const o = offsetStatus(offsets);
   const c = compatStatus(offsets, helper);
   const active = presets.find((p) => p.id === activeId) ?? null;
-  const allOk = h.tone === 'ok' && r.tone === 'ok' && c.tone === 'ok' && (o.tone === 'ok' || o.tone === 'warn');
+  const allOk = h.tone === 'ok' && r.tone === 'ok' && c.tone === 'ok' && o.tone === 'ok';
+  const okButUnverified = h.tone === 'ok' && r.tone === 'ok' && c.tone === 'ok' && o.tone === 'warn';
   const headline = allOk ? 'Tudo pronto'
+    : okButUnverified ? (offsets.status === 'offline' ? 'Pronto, mas versão LIVE não verificada' : 'Pronto, mas offsets desatualizados')
     : !helper && checked ? 'Abra o Helper'
     : h.tone !== 'ok' ? h.label
     : r.tone !== 'ok' ? (helper?.detection?.state === 'not-running' ? 'Abra o Roblox' : 'Roblox não identificado')
@@ -59,7 +60,7 @@ export function PainelPage({ invalidCount }: { invalidCount: number }) {
         <div className="col" style={{ gap: 2, flex: 1 }}>
           <div className="eyebrow">Painel do BOPE</div>
           <h2>{headline}</h2>
-          <p>{allOk ? 'Helper conectado, Roblox identificado e offsets na mesma versão. As ações e os presets estão prontos para uso.' : 'Siga os itens abaixo. Cada um mostra o que falta e como resolver.'}</p>
+          <p>{allOk ? 'Helper conectado, Roblox identificado, versão LIVE verificada e offsets na mesma versão. As ações e os presets estão prontos para uso.' : okButUnverified ? 'O Roblox em execução e os offsets em uso são da mesma versão (o Helper confere antes de escrever), mas o site não conseguiu confirmar a versão LIVE. Veja o item Offsets.' : 'Siga os itens abaixo. Cada um mostra o que falta e como resolver.'}</p>
         </div>
       </section>
 
@@ -82,11 +83,11 @@ export function PainelPage({ invalidCount }: { invalidCount: number }) {
         <Card title="Versão e offsets" icon={<Database size={18} />}>
           <dl className="kv">
             <dt>Versão atual (LIVE)</dt>
-            <dd className="mono">{offsets.liveVersion ?? <span className="faint">não verificada</span>}</dd>
+            <dd className="mono">{offsets.liveVersion ? <>✓ {offsets.liveVersion}</> : <span style={{ color: 'var(--amber)', fontFamily: 'var(--font)' }}>⚠ não verificada</span>}</dd>
             <dt>Offsets</dt>
-            <dd><Chip tone={o.tone === 'ok' ? 'ok' : o.tone}>{o.tone === 'ok' ? '✓ Atualizados' : o.label}</Chip></dd>
+            <dd><Chip tone={o.tone}>{o.label}</Chip></dd>
             <dt>Dataset em uso</dt>
-            <dd className="mono">{offsets.dataset ? `${offsets.dataset.version}` : '—'}</dd>
+            <dd className="mono">{offsets.dataset ? offsets.dataset.version : '—'}{offsets.dataset && offsets.status !== 'ready' && <span className="tag amber" style={{ marginLeft: 8, fontFamily: 'var(--font)' }}>não confirmado como atual</span>}</dd>
             <dt>Flags no dump</dt>
             <dd>{index ? formatNumber(index.size) : '—'}</dd>
             <dt>Última sincronização</dt>
@@ -102,21 +103,21 @@ export function PainelPage({ invalidCount }: { invalidCount: number }) {
           icon={<Crosshair size={18} />}
           actions={<Button size="sm" variant="ghost" onClick={() => navigate('acoes')}>Gerenciar</Button>}
         >
-          <div className="col" style={{ gap: 14 }}>
-            {ACTION_GROUPS.map((g) => (
-              <div key={g} className="col" style={{ gap: 6 }}>
-                <div className="eyebrow">{g}</div>
-                {actions.actions.filter((a) => a.group === g).map((a) => (
-                  <div key={a.id} className="row" style={{ justifyContent: 'space-between' }}>
-                    <span className="row truncate" style={{ gap: 8 }}>
-                      <span className="tag" style={a.enabled ? { background: 'var(--green-soft)', color: '#86efac' } : undefined}>{a.enabled ? 'Ativa' : 'Inativa'}</span>
-                      <span className="truncate" style={{ fontWeight: 600, color: a.enabled ? 'var(--text)' : 'var(--text-3)' }}>{a.macro.name}</span>
-                    </span>
-                    <KeyBadge code={a.trigger} />
-                  </div>
-                ))}
+          <div className="col" style={{ gap: 8 }}>
+            <span className="muted" style={{ fontSize: 13 }}>
+              {macros.macros.filter((m) => m.enabled).length} ativas · {macros.macros.filter((m) => !m.enabled).length} desativadas
+            </span>
+            {macros.macros.length === 0 && <span className="faint">Nenhuma ação criada.</span>}
+            {macros.macros.slice(0, 8).map((m) => (
+              <div key={m.id} className="row" style={{ justifyContent: 'space-between' }}>
+                <span className="row truncate" style={{ gap: 8 }}>
+                  <span className={`status-pill ${m.enabled ? 'on' : 'off'}`}>{m.enabled ? '● Ativa' : '○ Desativada'}</span>
+                  <span className="truncate" style={{ fontWeight: 600, color: m.enabled ? 'var(--text)' : 'var(--text-3)' }}>{m.name}</span>
+                </span>
+                <KeyBadge code={m.trigger} />
               </div>
             ))}
+            {macros.macros.length > 8 && <span className="faint" style={{ fontSize: 12.5 }}>+ {macros.macros.length - 8} ações</span>}
           </div>
         </Card>
       </div>

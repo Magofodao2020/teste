@@ -1,1 +1,5 @@
-/*    /index.html   200
+# Netlify: proxy do próprio site para o serviço de offsets (usado só quando o
+# CORS do serviço bloqueia a leitura direta pelo navegador). Lista fechada.
+/api/imtheo/roblox/version  https://offsets.imtheo.lol/roblox/version  200
+/api/imtheo/offsets.json    https://offsets.imtheo.lol/offsets.json    200
+/api/imtheo/FFlags.hpp      https://offsets.imtheo.lol/FFlags.hpp      200

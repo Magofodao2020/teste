@@ -4,10 +4,12 @@
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import http from 'node:http';
+import https from 'node:https';
 import { extname, join, resolve } from 'node:path';
 import { after, before, beforeEach, describe, it } from 'node:test';
 import { chromium } from 'playwright-core';
 import { startMockHelper } from './mock-helper.mjs';
+import { CHROMIUM_ARGS, FAKE_PORT, startFakeImtheo } from './fake-imtheo.mjs';
 
 const DIST = resolve('dist');
 const SITE_PORT = 8833;
@@ -22,11 +24,26 @@ const EXECUTABLE = process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium';
 const USER_PACK = JSON.parse(readFileSync(new URL('../unit/user-pack.json', import.meta.url), 'utf8'));
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2', '.txt': 'text/plain' };
+// Hosting de teste. Sem proxy = comportamento de hosting estático (404 em /api).
+// Com proxy = igual ao _worker.js/_redirects: repassa ao serviço (lado servidor, sem CORS).
+let proxyEnabled = false;
 function startStatic() {
   const server = http.createServer((req, res) => {
     let p = decodeURIComponent(req.url.split('?')[0]);
-    let file = join(DIST, p);
-    if (!file.startsWith(DIST) || !existsSync(file) || statSync(file).isDirectory()) file = join(DIST, 'index.html');
+    if (p.startsWith('/api/imtheo/')) {
+      const path = p.slice('/api/imtheo/'.length);
+      if (!proxyEnabled || !['roblox/version', 'offsets.json', 'FFlags.hpp'].includes(path)) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('Not Found'); }
+      const up = https.request({ host: '127.0.0.1', port: FAKE_PORT, path: '/' + path, servername: 'offsets.imtheo.lol', rejectUnauthorized: false }, (r) => {
+        const chunks = [];
+        r.on('data', (c) => chunks.push(c));
+        r.on('end', () => { res.writeHead(r.statusCode, { 'Content-Type': r.headers['content-type'] ?? 'text/plain', 'X-Bope-Proxy': '1' }); res.end(Buffer.concat(chunks)); });
+      });
+      up.on('error', () => { res.writeHead(502); res.end('erro'); });
+      return up.end();
+    }
+    if (p.endsWith('/')) p += 'index.html';
+    const file = join(DIST, p);
+    if (!file.startsWith(DIST) || !existsSync(file) || statSync(file).isDirectory()) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('Not Found'); }
     res.writeHead(200, { 'Content-Type': MIME[extname(file)] ?? 'application/octet-stream' });
     res.end(readFileSync(file));
   });
@@ -91,7 +108,7 @@ beforeEach(async () => {
 describe('versão automática e offsets', () => {
   it('versão LIVE igual ao dataset do site: offsets atualizados, nenhum download externo', async () => {
     const { page, ctx, errors } = await open({ [LIVE_URL]: { body: V_SITE } });
-    await page.getByText('✓ Atualizados').first().waitFor();
+    await page.getByText('✓ Versão LIVE verificada').first().waitFor();
     assert.equal(counts[OFFSETS_URL] ?? 0, 0);
     assert.equal(counts[LIVE_URL], 1);
     // Helper recebe o dataset, com prefixos de tipo nos nomes
@@ -105,17 +122,17 @@ describe('versão automática e offsets', () => {
 
   it('cache: ao reabrir com a mesma versão, não baixa nada de novo', async () => {
     const ctx = await browser.newContext();
-    await (await open({ [LIVE_URL]: { body: V_NEW }, [OFFSETS_URL]: { body: offsetsJson(V_NEW) } }, { context: ctx })).page.getByText('✓ Atualizados').first().waitFor();
+    await (await open({ [LIVE_URL]: { body: V_NEW }, [OFFSETS_URL]: { body: offsetsJson(V_NEW) } }, { context: ctx })).page.getByText('✓ Versão LIVE verificada').first().waitFor();
     assert.equal(counts[OFFSETS_URL], 1);
     const again = await open({ [LIVE_URL]: { body: V_NEW }, [OFFSETS_URL]: { body: offsetsJson(V_NEW) } }, { context: ctx });
-    await again.page.getByText('✓ Atualizados').first().waitFor();
+    await again.page.getByText('✓ Versão LIVE verificada').first().waitFor();
     assert.equal(counts[OFFSETS_URL] ?? 0, 0, 'reutiliza o dataset do cache');
     await ctx.close();
   });
 
   it('versão nova: baixa offsets.json, valida e envia ao Helper', async () => {
     const { page, ctx } = await open({ [LIVE_URL]: { body: V_NEW }, [OFFSETS_URL]: { body: offsetsJson(V_NEW) } });
-    await page.getByText('✓ Atualizados').first().waitFor();
+    await page.getByText('✓ Versão LIVE verificada').first().waitFor();
     assert.equal(counts[OFFSETS_URL], 1);
     assert.equal(counts[HPP_URL] ?? 0, 0);
     await waitFor(() => helper.state.offsets?.version === V_NEW);
@@ -128,7 +145,7 @@ describe('versão automática e offsets', () => {
   it('offsets.json sem FFlags: completa com FFlags.hpp da mesma versão', async () => {
     const hpp = `/*  Roblox Version  : ${V_NEW}\n*/\nnamespace FFlagOffsets {\n${Object.entries(flagsGroup()).map(([k, v]) => `inline constexpr uintptr_t ${k} = 0x${v.toString(16)};`).join('\n')}\n}`;
     const { page, ctx } = await open({ [LIVE_URL]: { body: V_NEW }, [OFFSETS_URL]: { body: offsetsJson(V_NEW, false) }, [HPP_URL]: { body: hpp } });
-    await page.getByText('✓ Atualizados').first().waitFor();
+    await page.getByText('✓ Versão LIVE verificada').first().waitFor();
     assert.equal(counts[HPP_URL], 1);
     await ctx.close();
   });
@@ -144,7 +161,8 @@ describe('versão automática e offsets', () => {
   it('JSON inválido/parcial: não substitui o dataset atual', async () => {
     const partial = offsetsJson(V_NEW).slice(0, 300);
     const { page, ctx } = await open({ [LIVE_URL]: { body: V_NEW }, [OFFSETS_URL]: { body: partial } });
-    await page.getByText('Não foi possível atualizar os offsets.').first().waitFor();
+    await page.getByText('⚠ Offsets desatualizados').first().waitFor();
+    await page.getByText(/não foi possível atualizar os offsets/).first().waitFor();
     await page.getByText(/Os dados atuais \(version-cec3ad5889b447cf\) foram mantidos/).first().waitFor();
     await waitFor(() => helper.state.offsets?.version === V_SITE);
     await ctx.close();
@@ -155,7 +173,8 @@ describe('versão automática e offsets', () => {
     for (const r of ['painel', 'acoes', 'presets', 'catalogo', 'config']) {
       await page.goto(`${SITE}#/${r}`);
       await page.waitForTimeout(400);
-      assert.equal(await page.locator('select').count(), 0, `select em ${r}`);
+      const versionSelects = await page.evaluate(() => [...document.querySelectorAll('select')].filter((s) => [...s.options].some((o) => /version-/.test(o.textContent ?? ''))).length);
+      assert.equal(versionSelects, 0, `seletor de versão em ${r}`);
       const text = await page.locator('body').innerText();
       assert.doesNotMatch(text, /selecionar versão|forçar versão|AHK/i, `texto proibido em ${r}`);
     }
@@ -163,40 +182,146 @@ describe('versão automática e offsets', () => {
   });
 });
 
-describe('ações', () => {
-  it('somente as cinco ações, com keybinds exatas e valores do pack enviados ao Helper', async () => {
+describe('ações e macros', () => {
+  const row = (page, name) => page.locator('article.macro-row', { has: page.locator('.macro-name', { hasText: new RegExp(`^${name.replace(/[()]/g, '\\$&')}$`) }) });
+  const enabledIds = () => (helper.state.macros ?? []).filter((m) => m.enabled).map((m) => m.id).sort();
+
+  it('estado inicial: modelos disponíveis e NENHUMA ação ativa; ativar/desativar uma; ativar todas; desativar todas', async () => {
     const { page, ctx } = await open({ [LIVE_URL]: { body: V_SITE } });
     await page.goto(`${SITE}#/acoes`);
-    const names = await page.locator('.action-name').allInnerTexts();
-    assert.deepEqual(names, ['Bug Indi', 'Bug indi ESQUERDA', 'Bug indi DIREITA', 'Perfect Dive', 'Gagatech']);
+    assert.deepEqual(await page.locator('.macro-name').allInnerTexts(), ['Bug Indi', 'Bug indi ESQUERDA', 'Bug indi DIREITA', 'Perfect Dive', 'Gagatech']);
+    assert.equal(await page.getByText('○ Desativada').count(), 5);
+    assert.equal(await page.getByText('● Ativa').count(), 0);
     const macros = await waitFor(() => helper.state.macros);
-    assert.equal(macros.length, 5);
+    assert.equal(macros.filter((m) => m.enabled).length, 0, 'nada ativo no Helper');
     macros.forEach((m, i) => {
       const { bope, v, ...fields } = USER_PACK.macros[i];
       assert.deepEqual({ name: m.name, mode: m.mode, repeat: m.repeat, loopDelay: m.loopDelay, speed: m.speed, robloxOnly: m.robloxOnly, steps: m.steps, trigger: m.trigger }, fields);
     });
-    assert.deepEqual(macros.map((m) => m.trigger), ['MouseBack', 'MouseForward', 'MouseBack', 'MouseRight', 'MouseForward']);
-    assert.deepEqual(helper.state.settings, { stopKey: 'F8' });
 
-    // ativar Bug indi DIREITA desativa Bug Indi (mesmo botão)
-    await page.getByRole('switch', { name: 'Ativar Bug indi DIREITA' }).click();
-    await waitFor(() => helper.state.macros.find((m) => m.id === 'bug-indi-direita').enabled);
-    assert.equal(helper.state.macros.find((m) => m.id === 'bug-indi').enabled, false);
-    assert.equal(await page.getByRole('switch', { name: 'Ativar Bug Indi', exact: true }).getAttribute('aria-checked'), 'false');
+    await row(page, 'Perfect Dive').getByRole('button', { name: 'Ativar', exact: true }).click();
+    await waitFor(() => enabledIds().join() === 'perfect-dive');
+    assert.equal(await row(page, 'Perfect Dive').getByText('● Ativa').count(), 1);
+    await row(page, 'Perfect Dive').getByRole('button', { name: 'Desativar', exact: true }).click();
+    await waitFor(() => enabledIds().length === 0);
 
-    // trocar botão por captura (tecla G) e restaurar padrão
-    await page.getByRole('button', { name: 'Botão de Gagatech' }).click();
+    await page.getByRole('button', { name: 'Ativar todas', exact: true }).click();
+    await waitFor(() => enabledIds().length === 5);
+    assert.equal(await page.getByText('● Ativa').count(), 5);
+    assert.equal(await page.getByRole('button', { name: 'Ativar todas', exact: true }).isDisabled(), true);
+    await page.getByRole('button', { name: 'Desativar todas', exact: true }).click();
+    await waitFor(() => enabledIds().length === 0);
+    assert.equal(await page.getByText('○ Desativada').count(), 5);
+
+    // estado persiste no navegador (o Helper não guarda nada)
+    await row(page, 'Gagatech').getByRole('button', { name: 'Ativar', exact: true }).click();
+    await page.reload(); await page.waitForSelector('.topbar');
+    await page.goto(`${SITE}#/acoes`);
+    assert.equal(await row(page, 'Gagatech').getByText('● Ativa').count(), 1);
+    await ctx.close();
+  });
+
+  it('criar, editar (reordenar/arrastar/duplicar/remover etapas), salvar desativada, duplicar e excluir', async () => {
+    const { page, ctx } = await open({ [LIVE_URL]: { body: V_SITE } });
+    await page.goto(`${SITE}#/acoes`);
+    await page.getByRole('button', { name: 'Criar ação' }).click();
+    await page.getByText('Nova ação').first().waitFor();
+    await page.getByLabel('Nome da ação').fill('Minha Macro');
+    await page.getByRole('button', { name: 'Botão que ativa' }).click();
     await page.waitForTimeout(200);
-    await page.keyboard.press('KeyG');
-    await waitFor(() => helper.state.macros.find((m) => m.id === 'gagatech').trigger === 'KeyG');
-    await page.getByRole('button', { name: 'Restaurar padrão' }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Restaurar padrão' }).click();
-    await waitFor(() => helper.state.macros.find((m) => m.id === 'gagatech').trigger === 'MouseForward');
+    await page.keyboard.press('F6');
 
-    // testar envia o macro com os mesmos passos
-    await page.getByRole('button', { name: 'Testar (3 s)' }).first().click();
-    const run = await waitFor(() => helper.state.posts.find((p) => p.path === '/macro/run'));
-    assert.deepEqual(run.data.macro.steps, USER_PACK.macros[0].steps);
+    // Etapa 1: tecla Space hold 30 · Etapa 2: esperar 50 · Etapa 3: tecla Q hold 30
+    const addStep = async (type) => { await page.getByLabel('Tipo da nova etapa').selectOption(type); await page.getByRole('button', { name: 'Adicionar etapa' }).click(); };
+    await addStep('key');
+    await page.getByRole('button', { name: 'Tecla da etapa' }).nth(0).click(); await page.waitForTimeout(200); await page.keyboard.press('Space');
+    await page.getByLabel('Segurar').nth(0).fill('30');
+    await addStep('wait');
+    await page.getByLabel('Esperar', { exact: true }).fill('50');
+    await addStep('key');
+    await page.getByRole('button', { name: 'Tecla da etapa' }).nth(1).click(); await page.waitForTimeout(200); await page.keyboard.press('KeyQ');
+    await page.getByLabel('Segurar').nth(1).fill('30');
+    // duplicar e remover a etapa 3, subir/descer, arrastar
+    await page.getByRole('button', { name: 'Duplicar etapa 3' }).click();
+    assert.equal(await page.locator('.step-card').count(), 4);
+    await page.getByRole('button', { name: 'Remover etapa 4' }).click();
+    await page.getByRole('button', { name: 'Descer etapa 1' }).click();
+    await page.getByRole('button', { name: 'Subir etapa 2' }).click();
+    await page.locator('.step-card').nth(2).dragTo(page.locator('.step-card').nth(0));
+    await page.locator('.step-card').nth(0).dragTo(page.locator('.step-card').nth(2));
+    await page.getByRole('button', { name: 'Salvar' }).click();
+    await page.getByText('Ação "Minha Macro" criada · Status: desativada.').waitFor();
+
+    const sent = await waitFor(() => helper.state.macros?.find((m) => m.name === 'Minha Macro'));
+    assert.equal(sent.enabled, false);
+    assert.equal(sent.trigger, 'F6');
+    assert.deepEqual(sent.steps, [{ t: 'key', code: 'Space', n: 1, hold: 30, gap: 60 }, { t: 'wait', ms: 50 }, { t: 'key', code: 'KeyQ', n: 1, hold: 30, gap: 60 }]);
+    assert.equal(await row(page, 'Minha Macro').getByText('○ Desativada').count(), 1);
+
+    // editar: renomear e alterar o modo
+    await row(page, 'Minha Macro').getByRole('button', { name: 'Editar' }).click();
+    await page.getByLabel('Nome da ação').fill('Minha Macro 2');
+    await page.getByRole('group', { name: 'Modo' }).getByRole('button', { name: 'Loop (liga/desliga)' }).click();
+    await page.getByRole('button', { name: 'Salvar' }).click();
+    await waitFor(() => helper.state.macros?.some((m) => m.name === 'Minha Macro 2' && m.mode === 'loop'));
+
+    // duplicar e excluir
+    await row(page, 'Minha Macro 2').getByRole('button', { name: 'Duplicar Minha Macro 2' }).click();
+    await row(page, 'Minha Macro 2 (cópia)').waitFor();
+    await row(page, 'Minha Macro 2 (cópia)').getByRole('button', { name: 'Excluir Minha Macro 2 (cópia)' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Excluir' }).click();
+    await waitFor(() => !helper.state.macros?.some((m) => m.name === 'Minha Macro 2 (cópia)'));
+
+    // validação: sem etapas não salva
+    await page.getByRole('button', { name: 'Criar ação' }).click();
+    await page.getByRole('button', { name: 'Salvar' }).click();
+    await page.getByText('Adicione pelo menos uma etapa.').waitFor();
+    await ctx.close();
+  });
+
+  it('gravar macro: gravando → parar → revisar no editor → salvar desativada', async () => {
+    const { page, ctx } = await open({ [LIVE_URL]: { body: V_SITE } });
+    await page.goto(`${SITE}#/acoes`);
+    await waitFor(() => helper.state.macros);
+    await page.getByRole('button', { name: 'Gravar macro' }).click();
+    await page.getByRole('button', { name: 'Começar a gravar' }).click();
+    await page.getByText('● Gravando...').waitFor();
+    await page.getByRole('button', { name: 'Parar gravação' }).click();
+    await page.getByText(/Gravação com 3 etapas/).waitFor();
+    assert.equal(await page.locator('.step-card').count(), 3);
+    await page.getByRole('button', { name: 'Botão que ativa' }).click(); await page.waitForTimeout(200); await page.keyboard.press('F7');
+    await page.getByRole('button', { name: 'Salvar' }).click();
+    const rec = await waitFor(() => helper.state.macros?.find((m) => m.name.startsWith('Gravação')));
+    assert.equal(rec.enabled, false);
+    assert.deepEqual(rec.steps.map((s) => s.t), ['key', 'click', 'scroll']);
+    assert.equal(helper.state.posts.find((p) => p.path === '/macro/record/start').data.countdown, 3000);
+    await ctx.close();
+  });
+
+  it('modelos, importar e exportar (sempre desativadas, sem AHK)', async () => {
+    const { page, ctx } = await open({ [LIVE_URL]: { body: V_SITE } });
+    await page.goto(`${SITE}#/acoes`);
+    await row(page, 'Bug Indi').getByRole('button', { name: 'Excluir Bug Indi' }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Excluir' }).click();
+    await page.getByRole('button', { name: 'Modelos' }).click();
+    await page.getByRole('dialog').locator('.list-row', { hasText: 'Bug Indi' }).first().getByRole('button', { name: 'Adicionar' }).click();
+    await page.keyboard.press('Escape');
+    await row(page, 'Bug Indi').waitFor();
+    assert.equal(await row(page, 'Bug Indi').getByText('○ Desativada').count(), 1);
+
+    await page.getByRole('button', { name: 'Importar' }).click();
+    const pack = { bope: 'macro-pack', v: 1, macros: [{ bope: 'macro', v: 1, name: 'Importada', trigger: 'KeyH', steps: [{ t: 'text', text: 'gg', gap: 20 }] }, { bope: 'macro', v: 1, name: 'Flick Up (AHK)', steps: [{ t: 'flick' }] }] };
+    await page.getByLabel('Dados para importar').fill(JSON.stringify(pack));
+    await page.getByRole('button', { name: /Importar 1 \(desativadas\)/ }).click();
+    await row(page, 'Importada').waitFor();
+    assert.equal(await page.getByText('Flick Up (AHK)').count(), 0);
+    const imp = await waitFor(() => helper.state.macros?.find((m) => m.name === 'Importada'));
+    assert.equal(imp.enabled, false);
+
+    await page.getByRole('button', { name: 'Exportar todas' }).click();
+    const json = JSON.parse(await page.getByLabel('JSON exportado').inputValue());
+    assert.equal(json.bope, 'macro-pack');
+    assert.ok(json.macros.every((m) => !('enabled' in m)));
     await ctx.close();
   });
 
@@ -206,6 +331,74 @@ describe('ações', () => {
     helper.restart();
     await waitFor(() => helper.state.offsets && helper.state.macros && helper.state.hotkeys, 12000);
     await ctx.close();
+  });
+});
+
+describe('CORS real (servidor HTTPS no lugar de offsets.imtheo.lol)', () => {
+  let corsBrowser, fake;
+  before(async () => {
+    fake = await startFakeImtheo();
+    corsBrowser = await chromium.launch({ executablePath: EXECUTABLE, args: CHROMIUM_ARGS });
+  });
+  after(async () => { proxyEnabled = false; await corsBrowser?.close(); await fake?.close(); });
+
+  async function openReal(path = 'painel') {
+    const ctx = await corsBrowser.newContext({ viewport: { width: 1360, height: 900 } });
+    const page = await ctx.newPage();
+    await page.goto(`${SITE}#/${path}`);
+    await page.waitForSelector('.topbar');
+    return { ctx, page };
+  }
+
+  it('servidor sem Access-Control-Allow-Origin e hosting estático: "CORS bloqueou a leitura da resposta" + fallback claro', async () => {
+    proxyEnabled = false;
+    fake.state.routes = { '/roblox/version': { body: 'version-cec3ad5889b447cf\n', cors: false } };
+    fake.state.hits = [];
+    const { ctx, page } = await openReal('config');
+    const diag = page.locator('section.card', { hasText: 'Diagnóstico da conexão' });
+    await diag.getByText('CORS bloqueou a leitura da resposta').first().waitFor();
+    await diag.getByText(`não autoriza a origem ${SITE.replace(/\/$/, '')}`, { exact: false }).waitFor();
+    await diag.getByText(/hosting estático sem o proxy/).waitFor();
+    assert.ok(fake.state.hits.some((h) => h.mode === 'cors' && h.origin === SITE.replace(/\/$/, '')), 'a requisição saiu com Origin');
+    assert.ok(fake.state.hits.some((h) => h.mode === 'no-cors'), 'sonda no-cors confirmou a resposta');
+    await page.goto(`${SITE}#/painel`);
+    await page.getByText('⚠ Versão LIVE não verificada').first().waitFor();
+    await page.getByText('não confirmado como atual').waitFor();
+    await page.getByText(/Usando o último dataset válido: version-cec3ad5889b447cf/).first().waitFor();
+    await ctx.close();
+  });
+
+  it('servidor sem CORS, mas hosting com proxy (/api/imtheo): verifica a versão e baixa offsets.json pelo proxy', async () => {
+    proxyEnabled = true;
+    fake.state.routes = {
+      '/roblox/version': { body: V_NEW, cors: false },
+      '/offsets.json': { body: offsetsJson(V_NEW), cors: false, type: 'application/json' },
+    };
+    const { ctx, page } = await openReal('painel');
+    await page.getByText('✓ Versão LIVE verificada').first().waitFor();
+    await waitFor(() => helper.state.offsets?.version === V_NEW);
+    await page.goto(`${SITE}#/config`);
+    await page.getByText('proxy do site').first().waitFor();
+    await ctx.close();
+    proxyEnabled = false;
+  });
+
+  it('servidor com CORS: leitura direta, sem proxy', async () => {
+    fake.state.routes = { '/roblox/version': { body: 'version-cec3ad5889b447cf', cors: true } };
+    fake.state.hits = [];
+    const { ctx, page } = await openReal('painel');
+    await page.getByText('✓ Versão LIVE verificada').first().waitFor();
+    assert.ok(!fake.state.hits.some((h) => h.mode === 'no-cors'));
+    await ctx.close();
+  });
+
+  it('HTTP 500 e resposta inválida têm diagnóstico próprio', async () => {
+    for (const [route, rx] of [[{ status: 500, body: 'erro interno', cors: true }, /HTTP 500/], [{ body: '<html>manutenção</html>', cors: true, type: 'text/html' }, /não é uma versão válida/]]) {
+      fake.state.routes = { '/roblox/version': route };
+      const { ctx, page } = await openReal('config');
+      await page.locator('section.card', { hasText: 'Diagnóstico da conexão' }).getByText(rx).first().waitFor();
+      await ctx.close();
+    }
   });
 });
 
@@ -285,7 +478,8 @@ describe('presets e flags inválidas', () => {
     const stores = await page.evaluate(() => new Promise((r) => { const q = indexedDB.open('gerenciador'); q.onsuccess = () => { r([...q.result.objectStoreNames]); q.result.close(); }; }));
     assert.deepEqual(stores.sort(), ['datasets', 'presets']);
     await page.goto(`${SITE}#/acoes`);
-    assert.equal(await page.locator('.action').count(), 5);
+    assert.equal(await page.locator('.macro-row').count(), 5);
+    assert.equal(await page.getByText('○ Desativada').count(), 5);
     await ctx.close();
   });
 });
