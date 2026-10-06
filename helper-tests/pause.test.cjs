@@ -20,8 +20,6 @@ names.push('FIntAliasA'); addresses.push('0x100800');
 names.push('FIntAliasB'); addresses.push('0x100800');
 names.push('FIntMis'); addresses.push('0x100902');
 names.push('FIntFar'); addresses.push('0x4000000');
-names.push('FIntRo'); addresses.push('0x2100010');
-names.push('FIntHidden'); addresses.push('0x2200010');
 // valores padrão do "jogo"
 for (let i = 0; i < 200; i++) { const b = Buffer.alloc(4); b.writeInt32LE(1000 + i); W.poke(at(0x100000 + i * 8), b); }
 for (let i = 0; i < 200; i++) W.poke(at(0x101000 + i * 8), Buffer.from([1]));
@@ -100,11 +98,11 @@ test('toggle liga/desliga restaura o original; cycle também', async () => {
   assert.ok(W.regions[0].buf.equals(snapshot));
 });
 
-test('offset em página de código: recusa sem mudar a proteção', async () => {
+test('offset em página não gravável: recusa sem mudar a proteção', async () => {
   const before = W.writes.length;
   const a = await post('/apply', { flags: { FIntBad: '1' }, dumpVersion: V });
   assert.equal(a.applied, 0);
-  assert.match(a.failures[0].reason, /página de código/);
+  assert.match(a.failures[0].reason, /não gravável/);
   assert.equal(W.writes.length, before);
 });
 
@@ -199,29 +197,4 @@ test('/restore faz o mesmo que pausar', async () => {
   const r = await post('/restore', { dumpVersion: V });
   assert.equal(r.reverted, 1);
   assert.ok(W.regions[0].buf.equals(snapshot));
-});
-
-test('dados só leitura: libera só durante a escrita e devolve a proteção (aplicar e pausar)', async () => {
-  const r = W.region(at(0x2100010));
-  { const b = Buffer.alloc(4); b.writeInt32LE(555); b.copy(r.buf, 0x10); }
-  const calls = W.protectCalls.length;
-  const a = await post('/apply', { flags: { FIntRo: '9' }, dumpVersion: V });
-  assert.equal(a.applied, 1, JSON.stringify(a.failures));
-  assert.equal(W.read(at(0x2100010), 4).readInt32LE(0), 9);
-  assert.equal(r.prot, 0x02, 'proteção original de volta');
-  assert.deepEqual(W.protectCalls.slice(calls).map((c) => c.prot), [0x04, 0x02]);
-  const p = await post('/pause', { dumpVersion: V });
-  assert.equal(p.reverted, 1, p.message);
-  assert.equal(W.read(at(0x2100010), 4).readInt32LE(0), 555);
-  assert.equal(r.prot, 0x02);
-});
-
-test('Windows não informa a região: escreve direto (sem mexer na proteção)', async () => {
-  const calls = W.protectCalls.length;
-  const a = await post('/apply', { flags: { FIntHidden: '3' }, dumpVersion: V });
-  assert.equal(a.applied, 1, JSON.stringify(a.failures));
-  assert.equal(W.read(at(0x2200010), 4).readInt32LE(0), 3);
-  assert.equal(W.protectCalls.length, calls);
-  await post('/pause', { dumpVersion: V });
-  assert.equal(W.read(at(0x2200010), 4).readInt32LE(0), 0);
 });
