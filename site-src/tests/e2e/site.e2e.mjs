@@ -381,9 +381,10 @@ describe('CORS real (servidor HTTPS no lugar de offsets.imtheo.lol)', () => {
 
   it('servidor sem CORS, mas hosting com proxy (/api/imtheo): verifica a versão e baixa offsets.json pelo proxy', async () => {
     proxyEnabled = true;
+    // O serviço real responde a versão e o JSON com Content-Type text/html.
     fake.state.routes = {
-      '/roblox/version': { body: V_NEW, cors: false },
-      '/offsets.json': { body: offsetsJson(V_NEW), cors: false, type: 'application/json' },
+      '/roblox/version': { body: V_NEW, cors: false, type: 'text/html; charset=utf-8' },
+      '/offsets.json': { body: offsetsJson(V_NEW), cors: false, type: 'text/html; charset=utf-8' },
     };
     const { ctx, page } = await openReal('painel');
     await page.getByText('✓ Versão LIVE verificada').first().waitFor();

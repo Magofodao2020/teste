@@ -137,11 +137,16 @@ export class RemoteClient {
     } catch (e) {
       err = e;
     }
-    const html = /text\/html/i.test(info.contentType ?? '') || (r ? /^\s*<(!doctype|html)/i.test(r.text) : false);
+    // "Página do site" é decidido pelo CORPO: o serviço de offsets responde a versão
+    // com Content-Type text/html, então o cabeçalho sozinho não prova nada.
+    const html = r ? /^\s*<(!doctype|html|head|body)/i.test(r.text) : /text\/html/i.test(info.contentType ?? '');
     // Proxy ausente: a rota não existe (404/405) ou o hosting devolveu a página do
     // site (fallback de SPA), sem o cabeçalho de identificação do proxy.
     const absent = !info.proxyActive && (html || info.status === 404 || info.status === 405 || (err != null && !(err instanceof RemoteError)));
-    if (r && !absent && !html) {
+    // Com o proxy ativo, qualquer 2xx é aceito aqui, mesmo com Content-Type text/html
+    // (o serviço de offsets envia a versão assim). O conteúdo é validado depois por
+    // parseLiveVersion/parseOffsetsJson/parseFFlagsHpp, que recusam HTML de verdade.
+    if (r && (info.proxyActive || (!absent && !html))) {
       this.route = 'proxy';
       return r;
     }

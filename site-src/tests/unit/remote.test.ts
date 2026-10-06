@@ -70,6 +70,32 @@ describe('diagnóstico da consulta LIVE', () => {
     expect(svc.getState().diagnostic?.message).toMatch(/devolveu a página do site/);
   });
 
+  it('proxy ATIVO com a versão em Content-Type text/html (como o serviço envia) é aceito', async () => {
+    const html = (body: string) => () => new Response(body, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8', 'x-bope-proxy': '1', 'x-bope-upstream-status': '200' } });
+    const { fn } = mockFetch({ [LIVE_VERSION_URL]: corsBlocked(), [OFFSETS_JSON_URL]: corsBlocked(), [PROXY_LIVE]: html(V_NEW + '\n'), [PROXY_OFFSETS]: html(offsetsJson(V_NEW, true)) });
+    const svc = new OffsetService({ fetch: fn, memory: await withOld(), siteBase: BASE });
+    await svc.refresh();
+    expect(svc.getState()).toMatchObject({ status: 'ready', liveVersion: V_NEW, source: 'remote' });
+  });
+
+  it('proxy SEM cabeçalho próprio com a versão em text/html também é aceito', async () => {
+    const { fn } = mockFetch({ [LIVE_VERSION_URL]: corsBlocked(), [PROXY_LIVE]: { status: 200, body: V_NEW, type: 'text/html' } });
+    const svc = new OffsetService({ fetch: fn, memory: await withOld(), siteBase: BASE });
+    await svc.refresh();
+    expect(svc.getState().liveVersion).toBe(V_NEW);
+  });
+
+  it('proxy ATIVO que devolve HTML de verdade: recusado na validação, com o início da resposta', async () => {
+    const page = () => new Response('<html><body>erro</body></html>', { status: 200, headers: { 'content-type': 'text/html', 'x-bope-proxy': '1' } });
+    const { fn } = mockFetch({ [LIVE_VERSION_URL]: corsBlocked(), [PROXY_LIVE]: page });
+    const svc = new OffsetService({ fetch: fn, memory: await withOld(), siteBase: BASE });
+    await svc.refresh();
+    const s = svc.getState();
+    expect(s.liveVersion).toBeNull();
+    expect(s.diagnostic?.kind).toBe('invalid');
+    expect(s.diagnostic?.message).toMatch(/<html>/);
+  });
+
   it('proxy ATIVO mas o serviço responde 404: a culpa é do serviço, não do hosting', async () => {
     const proxied404 = () => new Response('Not Found', { status: 404, headers: { 'content-type': 'text/plain', 'x-bope-proxy': '1', 'x-bope-upstream-status': '404' } });
     const { fn } = mockFetch({ [LIVE_VERSION_URL]: corsBlocked(), [PROXY_LIVE]: proxied404 });
