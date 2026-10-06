@@ -358,7 +358,7 @@ describe('CORS real (servidor HTTPS no lugar de offsets.imtheo.lol)', () => {
     const diag = page.locator('section.card', { hasText: 'Diagnóstico da conexão' });
     await diag.getByText('CORS bloqueou a leitura da resposta').first().waitFor();
     await diag.getByText(`não autoriza a origem ${SITE.replace(/\/$/, '')}`, { exact: false }).waitFor();
-    await diag.getByText(/hosting estático sem o proxy/).waitFor();
+    await diag.getByText(/O proxy do site \(\/api\/imtheo\/\) não está ativo/).waitFor();
     assert.ok(fake.state.hits.some((h) => h.mode === 'cors' && h.origin === SITE.replace(/\/$/, '')), 'a requisição saiu com Origin');
     assert.ok(fake.state.hits.some((h) => h.mode === 'no-cors'), 'sonda no-cors confirmou a resposta');
     await page.goto(`${SITE}#/painel`);
@@ -379,6 +379,16 @@ describe('CORS real (servidor HTTPS no lugar de offsets.imtheo.lol)', () => {
     await waitFor(() => helper.state.offsets?.version === V_NEW);
     await page.goto(`${SITE}#/config`);
     await page.getByText('proxy do site').first().waitFor();
+    await ctx.close();
+    proxyEnabled = false;
+  });
+
+  it('proxy ativo, mas o serviço responde 404: diagnóstico aponta o serviço (não o hosting)', async () => {
+    proxyEnabled = true;
+    fake.state.routes = {};
+    const { ctx, page } = await openReal('config');
+    const diag = page.locator('section.card', { hasText: 'Diagnóstico da conexão' });
+    await diag.getByText(/O proxy do site está ativo, mas offsets.imtheo.lol respondeu HTTP 404 para \/roblox\/version/).first().waitFor();
     await ctx.close();
     proxyEnabled = false;
   });

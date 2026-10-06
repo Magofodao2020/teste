@@ -28,6 +28,8 @@ export interface RequestInfo {
   redirectedTo?: string;
   durationMs?: number;
   sample?: string;
+  /** Resposta veio do proxy do site (cabeçalho X-Bope-Proxy). */
+  proxyActive?: boolean;
 }
 
 export class RemoteError extends Error {
@@ -88,6 +90,7 @@ export class RemoteClient {
       const res = await this.fetchFn(url, { method: 'GET', mode: 'cors', credentials: 'omit', cache: 'no-store', redirect: 'follow', signal: ctl.signal });
       info.status = res.status;
       info.contentType = res.headers?.get?.('content-type') ?? undefined;
+      if (res.headers?.get?.('x-bope-proxy') === '1') info.proxyActive = true;
       if (res.redirected && res.url && res.url !== url) info.redirectedTo = res.url;
       // text() só resolve com o corpo completo: queda no meio = exceção, nunca dado parcial.
       const text = await res.text();
@@ -126,23 +129,30 @@ export class RemoteClient {
   private async viaProxy(path: UpstreamPath, timeoutMs: number, corsError: RemoteError | null): Promise<RemoteText> {
     const url = `${this.siteBase}${PROXY_PREFIX}${path}`;
     const info: RequestInfo = { url, origin: pageOrigin(), via: 'proxy do site' };
+    const host = new URL(`${UPSTREAM_ORIGIN}/`).host;
+    let r: RemoteText | null = null;
+    let err: unknown = null;
     try {
-      const r = await this.request(url, timeoutMs, info);
-      // Hosting estático sem proxy: a rota não existe (404) ou devolve uma página HTML.
-      if (/text\/html/i.test(r.info.contentType ?? '') || /^\s*<(!doctype|html)/i.test(r.text)) throw new RemoteError('http', 'proxy ausente', info);
+      r = await this.request(url, timeoutMs, info);
+    } catch (e) {
+      err = e;
+    }
+    const html = /text\/html/i.test(info.contentType ?? '') || (r ? /^\s*<(!doctype|html)/i.test(r.text) : false);
+    // Proxy ausente: a rota não existe (404/405) ou o hosting devolveu a página do
+    // site (fallback de SPA), sem o cabeçalho de identificação do proxy.
+    const absent = !info.proxyActive && (html || info.status === 404 || info.status === 405 || (err != null && !(err instanceof RemoteError)));
+    if (r && !absent && !html) {
       this.route = 'proxy';
       return r;
-    } catch (e) {
-      const missing = e instanceof RemoteError && (e.message === 'proxy ausente' || e.info.status === 404 || e.info.status === 405);
-      if (corsError) {
-        const tail = missing
-          ? ' O site está num hosting estático sem o proxy /api/imtheo/ (veja o README: Cloudflare Pages, Netlify ou Vercel).'
-          : ` O proxy do site também falhou (${e instanceof RemoteError ? e.message : (e as Error).message}).`;
-        throw new RemoteError('cors', corsError.message + tail, corsError.info);
-      }
-      if (e instanceof RemoteError) throw e;
-      throw new RemoteError('network', `Não foi possível falar com o proxy do site (${(e as Error).message}).`, info);
     }
+    const prefix = corsError ? `${corsError.message} ` : '';
+    if (absent) {
+      throw new RemoteError(corsError ? 'cors' : 'network', `${prefix}O proxy do site (/api/imtheo/) não está ativo neste hosting: a rota ${info.status === 404 ? 'não existe (HTTP 404)' : html ? 'devolveu a página do site em vez do serviço' : 'não respondeu'}. No Cloudflare Pages isso significa que o _worker.js não foi publicado (veja o README).`, corsError?.info ?? info);
+    }
+    // Proxy ativo: o erro é do próprio serviço de offsets.
+    const st = info.status != null ? `HTTP ${info.status}` : 'erro';
+    const sample = info.sample ? ` (início da resposta: "${info.sample}")` : '';
+    throw new RemoteError('http', `${prefix}O proxy do site está ativo, mas ${host} respondeu ${st} para /${path}${sample}.`, info);
   }
 }
 

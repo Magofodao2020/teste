@@ -9,7 +9,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "test:e2e": "node --test --test-concurrency=1 tests/e2e/site.e2e.mjs",
-    "deploy:cloudflare": "npm run build && wrangler deploy"
+    "deploy:cloudflare": "npm run build && node scripts/deploy-workers.mjs && wrangler deploy"
   },
   "dependencies": {
     "lucide-react": "^1.52.0",

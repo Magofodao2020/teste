@@ -22,6 +22,9 @@ describe('proxy do site (_worker.js)', () => {
     expect(await ok.text()).toBe('version-cec3ad5889b447cf');
     expect(ok.headers.get('X-Bope-Proxy')).toBe('1');
     expect(ok.headers.get('Cache-Control')).toBe('public, max-age=60');
+    expect(ok.headers.get('X-Bope-Upstream-Status')).toBe('200');
+    const st = await worker.fetch(new Request('https://site.test/api/imtheo/_status'), env);
+    expect(await st.json()).toMatchObject({ ok: true, proxy: 'painel-bope' });
     expect(upstream).toHaveBeenCalledWith('https://offsets.imtheo.lol/roblox/version', expect.any(Object));
 
     expect(await (await worker.fetch(new Request('https://site.test/api/imtheo/../../etc/passwd'), env)).text()).toBe('static'); // normalizado: não passa pelo proxy

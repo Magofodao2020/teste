@@ -44,7 +44,8 @@ describe('diagnóstico da consulta LIVE', () => {
     expect(s.liveVersion).toBeNull();
     expect(s.diagnostic?.kind).toBe('cors');
     expect(s.diagnostic?.message).toMatch(/CORS bloqueou a leitura da resposta/);
-    expect(s.diagnostic?.message).toMatch(/hosting estático sem o proxy/);
+    expect(s.diagnostic?.message).toMatch(/proxy do site \(\/api\/imtheo\/\) não está ativo/);
+    expect(s.diagnostic?.message).toMatch(/HTTP 404/);
     expect(s.diagnostic?.info?.origin).toBeTruthy();
     expect(modes).toEqual(expect.arrayContaining([[LIVE_VERSION_URL, 'cors'], [LIVE_VERSION_URL, 'no-cors']]));
   });
@@ -67,7 +68,25 @@ describe('diagnóstico da consulta LIVE', () => {
     const svc = new OffsetService({ fetch: fn, storage: await withOld(), siteBase: BASE });
     await svc.refresh();
     expect(svc.getState().diagnostic?.kind).toBe('cors');
-    expect(svc.getState().diagnostic?.message).toMatch(/sem o proxy/);
+    expect(svc.getState().diagnostic?.message).toMatch(/devolveu a página do site/);
+  });
+
+  it('proxy ATIVO mas o serviço responde 404: a culpa é do serviço, não do hosting', async () => {
+    const proxied404 = () => new Response('Not Found', { status: 404, headers: { 'content-type': 'text/plain', 'x-bope-proxy': '1', 'x-bope-upstream-status': '404' } });
+    const { fn } = mockFetch({ [LIVE_VERSION_URL]: corsBlocked(), [PROXY_LIVE]: proxied404 });
+    const svc = new OffsetService({ fetch: fn, storage: await withOld(), siteBase: BASE });
+    await svc.refresh();
+    const d = svc.getState().diagnostic!;
+    expect(d.kind).toBe('http');
+    expect(d.message).toMatch(/O proxy do site está ativo, mas offsets.imtheo.lol respondeu HTTP 404 para \/roblox\/version/);
+    expect(d.message).not.toMatch(/não está ativo/);
+  });
+
+  it('proxy de Netlify/Vercel (sem cabeçalho próprio) que responde a versão é aceito', async () => {
+    const { fn } = mockFetch({ [LIVE_VERSION_URL]: corsBlocked(), [PROXY_LIVE]: V_NEW });
+    const svc = new OffsetService({ fetch: fn, storage: await withOld(), siteBase: BASE });
+    await svc.refresh();
+    expect(svc.getState().liveVersion).toBe(V_NEW);
   });
 
   it('sem conexão: sonda também falha → erro de rede (não é chamado de CORS)', async () => {

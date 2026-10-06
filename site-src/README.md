@@ -76,11 +76,16 @@ Lista fechada de caminhos, só GET, sem credenciais. O Helper nunca participa.
 | Vercel | `vercel deploy dist` | `vercel.json` |
 | GitHub Pages / estático puro | qualquer | sem proxy: só funciona se o serviço liberar CORS |
 
-O upload de arquivos no fluxo **Workers** do painel aceita só arquivos estáticos:
-ele recusa `_routes.json`/`_worker.js` ("Pages _routes.json is not supported"). Por
-isso o build não tem `_routes.json` e traz um `.assetsignore` que faz esse fluxo
-ignorar o `_worker.js` (o site publica, mas sem o proxy). Para ter o proxy, use o
-Cloudflare **Pages** (upload do zip) ou `npm run deploy:cloudflare`.
+O upload de arquivos no fluxo **Workers** do painel aceita só arquivos estáticos e
+recusa `_routes.json`/`_worker.js` ("Pages _routes.json is not supported"). Use o
+fluxo **Pages** para o zip, ou `npm run deploy:cloudflare` para publicar como Worker
+(esse comando cria `dist/.assetsignore` só para o deploy de Worker).
+
+**Conferir o proxy:** abra `https://SEU-SITE/api/imtheo/_status` (ou Configurações →
+Diagnóstico → *Testar proxy do site*). JSON `{"ok":true,"proxy":"painel-bope"}` = proxy
+ativo. A página do site ou 404 = o `_worker.js` não foi publicado.
+Com o proxy ativo, `https://SEU-SITE/api/imtheo/roblox/version` mostra exatamente o que
+o serviço de offsets responde.
 
 **Recomendado: Cloudflare Pages** — HTTPS automático, `_headers` já usado pelo site,
 proxy (`_worker.js`) funciona no upload direto do zip e plano gratuito generoso.

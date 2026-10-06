@@ -1,4 +1,0 @@
-# Cloudflare Workers (static assets): não publicar o script do proxy como arquivo.
-# O proxy roda como script do Worker (wrangler.jsonc → main), não como asset.
-_worker.js
-_routes.json

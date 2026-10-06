@@ -103,10 +103,30 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 /** Resultado real da última requisição ao serviço de offsets (nada é inferido). */
+/** Consulta /api/imtheo/_status: diz se o proxy (_worker.js) está ativo neste hosting. */
+async function checkProxy(): Promise<{ ok: boolean; text: string }> {
+  try {
+    const res = await fetch('./api/imtheo/_status', { cache: 'no-store' });
+    const isProxy = res.headers.get('x-bope-proxy') === '1';
+    if (isProxy && res.ok) return { ok: true, text: 'Proxy do site ATIVO (_worker.js publicado). Se ainda houver erro, ele vem do serviço de offsets — veja a mensagem acima.' };
+    const type = res.headers.get('content-type') ?? '';
+    return { ok: false, text: `Proxy do site NÃO está ativo: /api/imtheo/_status respondeu HTTP ${res.status}${/html/i.test(type) ? ' com a página do site' : ''}. No Cloudflare Pages, confira se o zip enviado tem o arquivo _worker.js na raiz.` };
+  } catch (e) {
+    return { ok: false, text: `Não foi possível testar o proxy (${(e as Error).message}).` };
+  }
+}
+
 function DiagnosticCard() {
   const d = useApp((s) => s.offsets.diagnostic);
+  const [proxy, setProxy] = useState<{ ok: boolean; text: string } | null>(null);
+  const [testing, setTesting] = useState(false);
   return (
-    <Card title="Diagnóstico da conexão" icon={<Activity size={18} />}>
+    <Card
+      title="Diagnóstico da conexão"
+      icon={<Activity size={18} />}
+      actions={<Button size="sm" busy={testing} onClick={async () => { setTesting(true); setProxy(await checkProxy()); setTesting(false); }}>Testar proxy do site</Button>}
+    >
+      {proxy && <div style={{ marginBottom: 12 }}><Notice tone={proxy.ok ? 'ok' : 'warn'}>{proxy.text}</Notice></div>}
       {!d ? (
         <p className="muted" style={{ margin: 0 }}>Nenhuma consulta ao serviço ainda.</p>
       ) : (
