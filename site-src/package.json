@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node scripts/postbuild.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "test:e2e": "node --test --test-concurrency=1 tests/e2e/site.e2e.mjs",

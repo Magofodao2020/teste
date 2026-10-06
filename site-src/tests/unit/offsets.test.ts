@@ -6,16 +6,15 @@ import {
 import {
   FFLAGS_HPP_URL, LIVE_VERSION_URL, OFFSETS_JSON_URL, OffsetService,
 } from '../../src/core/offsets/service';
-import { MemoryKV } from '../../src/core/storage/db';
 import { V_NEW, V_OLD, fflagsHpp, manifest, mockFetch, offsetsJson, siteDatasetJson } from './helpers';
 
 const BASE = 'https://site.test/';
 const MANIFEST = `${BASE}data/dumps/manifest.json`;
 const siteFile = (v: string) => `${BASE}data/dumps/${v}.json`;
 
-function service(routes: Parameters<typeof mockFetch>[0], storage = new MemoryKV()) {
+function service(routes: Parameters<typeof mockFetch>[0], storage = new Map()) {
   const f = mockFetch(routes);
-  return { svc: new OffsetService({ fetch: f.fn, storage, siteBase: BASE }), calls: f.calls, storage };
+  return { svc: new OffsetService({ fetch: f.fn, memory: storage, siteBase: BASE }), calls: f.calls, storage };
 }
 
 describe('parsers', () => {
@@ -80,17 +79,17 @@ describe('OffsetService', () => {
     expect(s.dataset?.version).toBe(V_NEW);
     expect(s.source).toBe('site');
     expect(calls).not.toContain(OFFSETS_JSON_URL);
-    expect((await storage.get('datasets', V_NEW))).toBeTruthy();
+    expect((storage.get(V_NEW))).toBeTruthy();
   });
 
-  it('versão igual à do cache: não baixa nada', async () => {
-    const storage = new MemoryKV();
-    await storage.put('datasets', parseSiteDataset(siteDatasetJson(V_NEW), V_NEW));
+  it('versão igual à que já está na memória da aba: não baixa nada', async () => {
+    const storage = new Map();
+    { const d = parseSiteDataset(siteDatasetJson(V_NEW), V_NEW); storage.set(d.version, d); }
     const { svc, calls } = service({ [LIVE_VERSION_URL]: V_NEW }, storage);
     await svc.start();
     svc.dispose();
     expect(svc.getState().status).toBe('ready');
-    expect(svc.getState().source).toBe('cache');
+    expect(svc.getState().source).toBe('memória');
     expect(calls).toEqual([LIVE_VERSION_URL]);
   });
 
@@ -122,8 +121,8 @@ describe('OffsetService', () => {
       () => Promise.resolve({ ok: true, status: 200, text: () => Promise.reject(new TypeError('network error')) } as unknown as Response),
       offsetsJson(V_OLD, true),
     ]) {
-      const storage = new MemoryKV();
-      await storage.put('datasets', parseSiteDataset(siteDatasetJson(V_OLD), V_OLD));
+      const storage = new Map();
+      { const d = parseSiteDataset(siteDatasetJson(V_OLD), V_OLD); storage.set(d.version, d); }
       const { svc } = service({ [LIVE_VERSION_URL]: V_NEW, [MANIFEST]: manifest([V_OLD]), [OFFSETS_JSON_URL]: bad }, storage);
       await svc.start();
       svc.dispose();
@@ -131,13 +130,13 @@ describe('OffsetService', () => {
       expect(s.status).toBe('outdated');
       expect(s.dataset?.version).toBe(V_OLD);
       expect(s.error).toMatch(/Não foi possível atualizar os offsets/);
-      expect(await storage.get('datasets', V_NEW)).toBeUndefined();
+      expect(storage.get(V_NEW)).toBeUndefined();
     }
   });
 
   it('sem internet: usa o último dataset do cache', async () => {
-    const storage = new MemoryKV();
-    await storage.put('datasets', parseSiteDataset(siteDatasetJson(V_OLD), V_OLD));
+    const storage = new Map();
+    { const d = parseSiteDataset(siteDatasetJson(V_OLD), V_OLD); storage.set(d.version, d); }
     const { svc } = service({}, storage);
     await svc.start();
     svc.dispose();
@@ -175,12 +174,12 @@ describe('OffsetService', () => {
   });
 
   it('cache guarda no máximo 3 versões', async () => {
-    const storage = new MemoryKV();
+    const storage = new Map();
     for (let i = 0; i < 4; i++) {
       const v = `version-${String(i).repeat(16)}`;
       const { svc } = service({ [LIVE_VERSION_URL]: v, [MANIFEST]: manifest([v]), [siteFile(v)]: siteDatasetJson(v) }, storage);
       await svc.refresh();
     }
-    expect((await storage.getAll('datasets')).length).toBe(3);
+    expect([...storage.values()].length).toBe(3);
   });
 });

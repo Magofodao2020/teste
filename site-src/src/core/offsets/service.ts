@@ -1,15 +1,16 @@
 // Serviço de offsets — ÚNICO lugar do site que busca versão/offsets na internet.
 // O Helper não participa: ele só recebe do site o dataset já validado.
 //
-//   abrir site → dataset do cache (rápido) → GET /roblox/version
+//   abrir site → GET /roblox/version
 //     ├─ mesma versão do dataset → reutiliza (nenhum download)
-//     └─ versão nova → cache do navegador → dataset publicado com o site
+//     └─ versão nova → memória desta aba → dataset publicado com o site
 //                     → GET /offsets.json (+ FFlags.hpp se o JSON não trouxer flags)
 //                     → valida → só então substitui o dataset atual
 // Falha em qualquer etapa mantém o dataset atual e registra a CAUSA exata
 // (CORS, rede, timeout, HTTP, resposta vazia/inválida) para a interface.
-
-import type { KV } from '../storage/db';
+//
+// Nada de offsets é gravado no computador: o "cache" é só memória desta aba.
+// Ao reabrir o site, ele consulta a versão de novo (e baixa, se precisar).
 import {
   DatasetError, type FlagDataset, isValidDataset, normalizeVersion,
   parseFFlagsHpp, parseOffsetsJson, parseSiteDataset,
@@ -25,7 +26,7 @@ export const FFLAGS_HPP_URL = `${UPSTREAM_ORIGIN}/FFlags.hpp`;
 export const CHECK_INTERVAL_MS = 30 * 60 * 1000;
 const LIVE_TIMEOUT_MS = 10_000;
 const DOWNLOAD_TIMEOUT_MS = 30_000;
-const MAX_CACHED_DATASETS = 3;
+const MAX_MEMORY_DATASETS = 3;
 
 export type OffsetStatus =
   | 'loading'      // ainda sem nada (primeiro instante)
@@ -36,7 +37,7 @@ export type OffsetStatus =
   | 'offline'      // versão LIVE NÃO verificada → usando o último dataset válido
   | 'unavailable'; // nenhum dataset válido
 
-export type DatasetSource = 'cache' | 'site' | 'remote';
+export type DatasetSource = 'memória' | 'site' | 'remote';
 
 /** Resultado da última consulta ao serviço (o que aconteceu de verdade). */
 export interface Diagnostic {
@@ -61,7 +62,8 @@ export interface OffsetState {
 
 export interface OffsetServiceDeps {
   fetch: typeof fetch;
-  storage: KV;
+  /** Datasets já em memória (só a sessão atual; nada vai para o disco). */
+  memory?: Map<string, FlagDataset>;
   /** Base dos arquivos publicados com o site (data/dumps/…, api/…). */
   siteBase: string;
   now?: () => number;
@@ -84,10 +86,12 @@ export class OffsetService {
   };
   private readonly now: () => number;
   private readonly remote: RemoteClient;
+  private readonly memory: Map<string, FlagDataset>;
 
   constructor(private deps: OffsetServiceDeps) {
     this.now = deps.now ?? Date.now;
     this.remote = new RemoteClient(deps.fetch, deps.siteBase, this.now);
+    this.memory = deps.memory ?? new Map();
   }
 
   getState = (): OffsetState => this.state;
@@ -102,10 +106,8 @@ export class OffsetService {
     for (const fn of this.listeners) fn();
   }
 
-  /** Inicia: carrega o último dataset do cache e verifica a versão LIVE uma vez. */
+  /** Inicia: verifica a versão LIVE uma vez (e a cada 30 min com a aba visível). */
   async start(): Promise<void> {
-    const cached = await this.latestCached();
-    if (cached) this.set({ dataset: cached, source: 'cache' });
     if (typeof document !== 'undefined' && !this.timer) {
       document.addEventListener('visibilitychange', this.onVisible);
       this.timer = setInterval(() => {
@@ -155,7 +157,7 @@ export class OffsetService {
 
     const cached = await this.cachedFor(live);
     if (cached) {
-      this.set({ status: 'ready', dataset: cached, source: 'cache', lastSyncAt: this.now(), error: null });
+      this.set({ status: 'ready', dataset: cached, source: 'memória', lastSyncAt: this.now(), error: null });
       return;
     }
 
@@ -178,7 +180,7 @@ export class OffsetService {
   private async useFallback(error: string, statusWithData: OffsetStatus = 'offline') {
     if (this.state.dataset) { this.set({ status: statusWithData, error }); return; }
     const cached = await this.latestCached();
-    if (cached) { this.set({ status: statusWithData, dataset: cached, source: 'cache', error }); return; }
+    if (cached) { this.set({ status: statusWithData, dataset: cached, source: 'memória', error }); return; }
     try {
       const site = await this.siteDataset(null);
       if (site) {
@@ -267,36 +269,22 @@ export class OffsetService {
     };
   }
 
-  // ───────── cache (IndexedDB do site) ─────────
+  // ───────── memória da aba (sem disco) ─────────
 
   private async cachedFor(version: string): Promise<FlagDataset | null> {
-    try {
-      const d = await this.deps.storage.get<FlagDataset>('datasets', version);
-      return isValidDataset(d) && d.version === version ? d : null;
-    } catch {
-      return null;
-    }
+    const d = this.memory.get(version);
+    return isValidDataset(d) && d.version === version ? d : null;
   }
 
   private async latestCached(): Promise<FlagDataset | null> {
-    try {
-      const all = (await this.deps.storage.getAll<FlagDataset>('datasets')).filter(isValidDataset);
-      all.sort((a, b) => b.fetchedAt - a.fetchedAt);
-      return all[0] ?? null;
-    } catch {
-      return null;
-    }
+    const all = [...this.memory.values()].filter(isValidDataset).sort((a, b) => b.fetchedAt - a.fetchedAt);
+    return all[0] ?? null;
   }
 
   private async store(ds: FlagDataset) {
-    try {
-      await this.deps.storage.put('datasets', ds);
-      const all = await this.deps.storage.getAll<FlagDataset>('datasets');
-      all.sort((a, b) => (b.fetchedAt ?? 0) - (a.fetchedAt ?? 0));
-      for (const old of all.slice(MAX_CACHED_DATASETS)) await this.deps.storage.delete('datasets', old.version);
-    } catch {
-      // Cache indisponível: o dataset continua válido em memória nesta sessão.
-    }
+    this.memory.set(ds.version, ds);
+    const all = [...this.memory.values()].sort((a, b) => b.fetchedAt - a.fetchedAt);
+    for (const old of all.slice(MAX_MEMORY_DATASETS)) this.memory.delete(old.version);
   }
 }
 

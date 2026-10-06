@@ -95,7 +95,7 @@ export class AppStore {
         macros: this.loadMacros(),
       });
       this.savePrefs();
-      const service = new OffsetService({ fetch: this.deps.fetch, storage, siteBase: this.deps.base });
+      const service = new OffsetService({ fetch: this.deps.fetch, siteBase: this.deps.base });
       this.offsetService = service;
       service.subscribe(() => this.onOffsets(service.getState()));
       void service.start();

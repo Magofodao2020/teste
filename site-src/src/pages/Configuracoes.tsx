@@ -7,7 +7,7 @@ import { helperStatus, offsetStatus } from '../state/status';
 import { store, useApp } from '../state/store';
 import { Ago, Button, Card, Chip, Confirm, Notice } from '../ui/components';
 
-const SOURCE_LABEL = { cache: 'cache do navegador', site: 'dados publicados com o site', remote: 'serviço de offsets (download)' } as const;
+const SOURCE_LABEL = { 'memória': 'memória desta aba', site: 'dados publicados com o site', remote: 'serviço de offsets (download)' } as const;
 
 export function ConfigPage() {
   const helper = useApp((s) => s.helper);
@@ -32,6 +32,13 @@ export function ConfigPage() {
               <dt>Roblox em execução</dt><dd className="mono">{helper?.runningBuild ?? '—'}</dd>
               <dt>Offsets no Helper</dt><dd className="mono">{helper?.siteOffsetsBuild ?? '—'}</dd>
             </dl>
+            {!helper && checked && (
+              <Notice tone="warn">
+                Não encontrou o Helper com o help.bat aberto? O navegador pode estar bloqueando o acesso a <span className="mono">127.0.0.1</span>:
+                no <strong>Chrome/Edge</strong>, aceite o pedido de “acesso à rede local”; no <strong>Brave</strong>, permita “acesso ao localhost” no escudo do site;
+                no <strong>LibreWolf/Firefox com uBlock Origin</strong>, libere o site na lista “Block Outsider Intrusion into LAN”. Safari não permite.
+              </Notice>
+            )}
             <p className="faint" style={{ margin: 0, fontSize: 12.5 }}>
               O Helper roda só na sua máquina, sem internet e sem gravar nada no PC. Ele recebe deste site os offsets, as ações e os atalhos, e mantém tudo apenas em memória.
             </p>
@@ -54,7 +61,7 @@ export function ConfigPage() {
             </dl>
             <p className="faint" style={{ margin: 0, fontSize: 12.5 }}>
               A versão é definida automaticamente pela versão LIVE publicada em <span className="mono">{new URL(LIVE_VERSION_URL).host}</span>, verificada ao abrir o site e a cada 30 minutos.
-              Os offsets só são baixados quando a versão muda; um download inválido nunca substitui os dados atuais.
+              Os offsets ficam só na memória desta aba (nada é gravado no computador) e só são baixados quando a versão muda; um download inválido nunca substitui os dados atuais.
             </p>
             {offsets.error && offsets.status !== 'ready' && <Notice tone={offsets.status === 'unavailable' ? 'err' : 'warn'}>{offsets.error}</Notice>}
             <div>
@@ -68,9 +75,9 @@ export function ConfigPage() {
 
       <Card title="Dados deste navegador" icon={<HardDrive size={18} />}>
         <div className="col" style={{ gap: 12 }}>
-          {!persistent && <Notice tone="warn">O navegador bloqueou o armazenamento local. Presets e cache valem só enquanto esta aba estiver aberta.</Notice>}
+          {!persistent && <Notice tone="warn">O navegador bloqueou o armazenamento local. Presets valem só enquanto esta aba estiver aberta.</Notice>}
           <p className="muted" style={{ margin: 0 }}>
-            Presets, atalhos, ações e o cache de offsets ficam salvos apenas neste navegador. Apagar remove tudo isso daqui; o Helper não guarda nada.
+            Só as suas configurações (presets, atalhos e ações) ficam guardadas pelo navegador, para não se perderem ao fechar a aba. Offsets não são gravados. Apagar remove tudo isso; o Helper não guarda nada.
           </p>
           <div><Button variant="danger" icon={<Trash2 />} onClick={() => setConfirmWipe(true)}>Apagar dados do site</Button></div>
         </div>
@@ -84,7 +91,7 @@ export function ConfigPage() {
           onClose={() => setConfirmWipe(false)}
           onConfirm={async () => { store.dispose(); await deleteAllSiteData(); location.reload(); }}
         >
-          <p style={{ margin: 0 }}>Remove todos os presets, atalhos, configurações das ações e o cache de offsets deste navegador. Não dá para desfazer.</p>
+          <p style={{ margin: 0 }}>Remove todos os presets, atalhos e configurações das ações deste navegador. Não dá para desfazer.</p>
         </Confirm>
       )}
     </div>

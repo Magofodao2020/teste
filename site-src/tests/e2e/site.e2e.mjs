@@ -120,13 +120,24 @@ describe('versão automática e offsets', () => {
     await ctx.close();
   });
 
-  it('cache: ao reabrir com a mesma versão, não baixa nada de novo', async () => {
+  it('nada de offsets gravado no computador: ao reabrir consulta de novo; na mesma aba, não repete download', async () => {
     const ctx = await browser.newContext();
-    await (await open({ [LIVE_URL]: { body: V_NEW }, [OFFSETS_URL]: { body: offsetsJson(V_NEW) } }, { context: ctx })).page.getByText('✓ Versão LIVE verificada').first().waitFor();
+    const first = await open({ [LIVE_URL]: { body: V_NEW }, [OFFSETS_URL]: { body: offsetsJson(V_NEW) } }, { context: ctx });
+    await first.page.getByText('✓ Versão LIVE verificada').first().waitFor();
     assert.equal(counts[OFFSETS_URL], 1);
+    // "Verificar agora" na mesma aba: versão igual → só a consulta de versão
+    await first.page.goto(`${SITE}#/config`);
+    await first.page.getByRole('button', { name: 'Verificar agora' }).click();
+    await first.page.waitForTimeout(800);
+    assert.equal(counts[OFFSETS_URL], 1, 'mesma aba reaproveita a memória');
+    // nenhum dataset de offsets no IndexedDB nem no localStorage
+    const stored = await first.page.evaluate(() => new Promise((r) => { const q = indexedDB.open('gerenciador'); q.onsuccess = () => { r({ stores: [...q.result.objectStoreNames], ls: JSON.stringify(localStorage) }); q.result.close(); }; }));
+    assert.deepEqual(stored.stores, ['presets']);
+    assert.doesNotMatch(stored.ls, /NovaFlag|0x3000/);
+    // nova abertura: memória vazia → baixa de novo (nada ficou salvo)
     const again = await open({ [LIVE_URL]: { body: V_NEW }, [OFFSETS_URL]: { body: offsetsJson(V_NEW) } }, { context: ctx });
     await again.page.getByText('✓ Versão LIVE verificada').first().waitFor();
-    assert.equal(counts[OFFSETS_URL] ?? 0, 0, 'reutiliza o dataset do cache');
+    assert.equal(counts[OFFSETS_URL], 1);
     await ctx.close();
   });
 
@@ -486,7 +497,7 @@ describe('presets e flags inválidas', () => {
     assert.equal(ls.macros, null);
     assert.ok(ls.hotkeys.includes('F6'));
     const stores = await page.evaluate(() => new Promise((r) => { const q = indexedDB.open('gerenciador'); q.onsuccess = () => { r([...q.result.objectStoreNames]); q.result.close(); }; }));
-    assert.deepEqual(stores.sort(), ['datasets', 'presets']);
+    assert.deepEqual(stores.sort(), ['presets']);
     await page.goto(`${SITE}#/acoes`);
     assert.equal(await page.locator('.macro-row').count(), 5);
     assert.equal(await page.getByText('○ Desativada').count(), 5);

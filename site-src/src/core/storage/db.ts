@@ -3,14 +3,15 @@
 //
 // Banco "gerenciador" (mesmo nome do site antigo, para manter os presets):
 //   v1 (site antigo): dumpMeta, dumpFlags, presets, history, cache
-//   v2 (este site):   presets, datasets
-// A v2 apaga os stores de dumps importados/histórico — eram da seleção manual de
-// versão, que não existe mais.
+//   v2:               presets, datasets
+//   v3 (este site):   presets
+// Os offsets NÃO são gravados (ficam só na memória da aba); a v3 apaga o cache de
+// offsets que versões anteriores guardavam.
 
 const DB_NAME = 'gerenciador';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const LEGACY_DBS = ['fflag-manager'];
-export type StoreName = 'presets' | 'datasets';
+export type StoreName = 'presets';
 
 function req<T>(r: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -60,10 +61,9 @@ class IdbKV implements KV {
 /** Sem IndexedDB (aba anônima restrita etc.): funciona, mas só nesta sessão. */
 export class MemoryKV implements KV {
   readonly persistent = false;
-  private stores: Record<StoreName, Map<string, unknown>> = { presets: new Map(), datasets: new Map() };
-  private keyOf(store: StoreName, v: unknown) {
-    const o = v as { id?: string; version?: string };
-    return String(store === 'datasets' ? o.version : o.id);
+  private stores: Record<StoreName, Map<string, unknown>> = { presets: new Map() };
+  private keyOf(_store: StoreName, v: unknown) {
+    return String((v as { id?: string }).id);
   }
   async getAll<T>(store: StoreName) { return [...this.stores[store].values()].map((v) => structuredClone(v)) as T[]; }
   async get<T>(store: StoreName, key: string) { const v = this.stores[store].get(key); return v === undefined ? undefined : (structuredClone(v) as T); }
@@ -77,11 +77,10 @@ export async function openStorage(idb: IDBFactory | undefined = globalThis.index
     const open = idb.open(DB_NAME, DB_VERSION);
     open.onupgradeneeded = () => {
       const db = open.result;
-      for (const old of ['dumpMeta', 'dumpFlags', 'history', 'cache']) {
+      for (const old of ['dumpMeta', 'dumpFlags', 'history', 'cache', 'datasets']) {
         if (db.objectStoreNames.contains(old)) db.deleteObjectStore(old);
       }
       if (!db.objectStoreNames.contains('presets')) db.createObjectStore('presets', { keyPath: 'id' });
-      if (!db.objectStoreNames.contains('datasets')) db.createObjectStore('datasets', { keyPath: 'version' });
     };
     const db = await req(open);
     for (const name of LEGACY_DBS) {

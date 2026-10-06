@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseSiteDataset } from '../../src/core/offsets/dataset';
 import { RemoteClient, parseLiveVersion } from '../../src/core/offsets/remote';
 import { LIVE_VERSION_URL, OFFSETS_JSON_URL, OffsetService } from '../../src/core/offsets/service';
-import { MemoryKV } from '../../src/core/storage/db';
 import { V_NEW, V_OLD, corsBlocked, mockFetch, offsetsJson, siteDatasetJson } from './helpers';
 
 const BASE = 'https://meusite.test/';
@@ -10,8 +9,8 @@ const PROXY_LIVE = `${BASE}api/imtheo/roblox/version`;
 const PROXY_OFFSETS = `${BASE}api/imtheo/offsets.json`;
 
 async function withOld() {
-  const storage = new MemoryKV();
-  await storage.put('datasets', parseSiteDataset(siteDatasetJson(V_OLD), V_OLD));
+  const storage = new Map();
+  { const d = parseSiteDataset(siteDatasetJson(V_OLD), V_OLD); storage.set(d.version, d); }
   return storage;
 }
 
@@ -37,7 +36,7 @@ describe('parseLiveVersion', () => {
 describe('diagnóstico da consulta LIVE', () => {
   it('CORS: a sonda no-cors responde → "CORS bloqueou a leitura"; hosting sem proxy é explicado', async () => {
     const { fn, modes } = mockFetch({ [LIVE_VERSION_URL]: corsBlocked(), [PROXY_LIVE]: { status: 404, body: 'Not found' } });
-    const svc = new OffsetService({ fetch: fn, storage: await withOld(), siteBase: BASE });
+    const svc = new OffsetService({ fetch: fn, memory: await withOld(), siteBase: BASE });
     await svc.refresh();
     const s = svc.getState();
     expect(s.status).toBe('offline');
@@ -55,7 +54,7 @@ describe('diagnóstico da consulta LIVE', () => {
       [LIVE_VERSION_URL]: corsBlocked(), [OFFSETS_JSON_URL]: corsBlocked(),
       [PROXY_LIVE]: V_NEW, [PROXY_OFFSETS]: offsetsJson(V_NEW, true),
     });
-    const svc = new OffsetService({ fetch: fn, storage: await withOld(), siteBase: BASE });
+    const svc = new OffsetService({ fetch: fn, memory: await withOld(), siteBase: BASE });
     await svc.refresh();
     expect(svc.getState()).toMatchObject({ status: 'ready', liveVersion: V_NEW, source: 'remote' });
     expect(svc.getState().diagnostic?.info?.via).toBe('proxy do site');
@@ -65,7 +64,7 @@ describe('diagnóstico da consulta LIVE', () => {
 
   it('proxy que devolve a página HTML do site (rewrite SPA) não é aceito como proxy', async () => {
     const { fn } = mockFetch({ [LIVE_VERSION_URL]: corsBlocked(), [PROXY_LIVE]: { status: 200, body: '<!doctype html><html></html>', type: 'text/html' } });
-    const svc = new OffsetService({ fetch: fn, storage: await withOld(), siteBase: BASE });
+    const svc = new OffsetService({ fetch: fn, memory: await withOld(), siteBase: BASE });
     await svc.refresh();
     expect(svc.getState().diagnostic?.kind).toBe('cors');
     expect(svc.getState().diagnostic?.message).toMatch(/devolveu a página do site/);
@@ -74,7 +73,7 @@ describe('diagnóstico da consulta LIVE', () => {
   it('proxy ATIVO mas o serviço responde 404: a culpa é do serviço, não do hosting', async () => {
     const proxied404 = () => new Response('Not Found', { status: 404, headers: { 'content-type': 'text/plain', 'x-bope-proxy': '1', 'x-bope-upstream-status': '404' } });
     const { fn } = mockFetch({ [LIVE_VERSION_URL]: corsBlocked(), [PROXY_LIVE]: proxied404 });
-    const svc = new OffsetService({ fetch: fn, storage: await withOld(), siteBase: BASE });
+    const svc = new OffsetService({ fetch: fn, memory: await withOld(), siteBase: BASE });
     await svc.refresh();
     const d = svc.getState().diagnostic!;
     expect(d.kind).toBe('http');
@@ -84,14 +83,14 @@ describe('diagnóstico da consulta LIVE', () => {
 
   it('proxy de Netlify/Vercel (sem cabeçalho próprio) que responde a versão é aceito', async () => {
     const { fn } = mockFetch({ [LIVE_VERSION_URL]: corsBlocked(), [PROXY_LIVE]: V_NEW });
-    const svc = new OffsetService({ fetch: fn, storage: await withOld(), siteBase: BASE });
+    const svc = new OffsetService({ fetch: fn, memory: await withOld(), siteBase: BASE });
     await svc.refresh();
     expect(svc.getState().liveVersion).toBe(V_NEW);
   });
 
   it('sem conexão: sonda também falha → erro de rede (não é chamado de CORS)', async () => {
     const { fn, calls } = mockFetch({});
-    const svc = new OffsetService({ fetch: fn, storage: await withOld(), siteBase: BASE });
+    const svc = new OffsetService({ fetch: fn, memory: await withOld(), siteBase: BASE });
     await svc.refresh();
     expect(svc.getState().diagnostic?.kind).toBe('network');
     expect(calls).not.toContain(PROXY_LIVE); // proxy só com CORS confirmado
@@ -100,7 +99,7 @@ describe('diagnóstico da consulta LIVE', () => {
   it('HTTP 500 e resposta vazia têm causas próprias', async () => {
     for (const [route, kind, rx] of [[{ status: 500, body: 'erro' }, 'http', /HTTP 500/], ['', 'empty', /vazia/]] as const) {
       const { fn } = mockFetch({ [LIVE_VERSION_URL]: route });
-      const svc = new OffsetService({ fetch: fn, storage: await withOld(), siteBase: BASE });
+      const svc = new OffsetService({ fetch: fn, memory: await withOld(), siteBase: BASE });
       await svc.refresh();
       expect(svc.getState().status).toBe('offline');
       expect(svc.getState().diagnostic?.kind).toBe(kind);
@@ -114,7 +113,7 @@ describe('diagnóstico da consulta LIVE', () => {
       init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
     });
     const { fn } = mockFetch({ [LIVE_VERSION_URL]: hang });
-    const svc = new OffsetService({ fetch: fn, storage: await withOld(), siteBase: BASE });
+    const svc = new OffsetService({ fetch: fn, memory: await withOld(), siteBase: BASE });
     const p = svc.refresh();
     await vi.advanceTimersByTimeAsync(10_500);
     await p;
@@ -125,7 +124,7 @@ describe('diagnóstico da consulta LIVE', () => {
   it('falha depois de um sucesso: a versão LIVE antiga não é reaproveitada', async () => {
     let up = true;
     const { fn } = mockFetch({ [LIVE_VERSION_URL]: () => { if (up) return new Response(V_OLD); throw new TypeError('x'); } });
-    const svc = new OffsetService({ fetch: fn, storage: await withOld(), siteBase: BASE });
+    const svc = new OffsetService({ fetch: fn, memory: await withOld(), siteBase: BASE });
     await svc.refresh();
     expect(svc.getState()).toMatchObject({ status: 'ready', liveVersion: V_OLD });
     up = false;

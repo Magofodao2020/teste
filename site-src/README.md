@@ -25,7 +25,7 @@ src/
     helper/client.ts    cliente do Helper local (127.0.0.1:7962–7966)
     macros.ts           ações/macros (modelos, sanitização igual ao Helper, import/export)
     presets.ts          presets, importação/exportação, limpeza de flags inexistentes
-    storage/            IndexedDB do site (presets + cache de offsets) e localStorage (preferências)
+    storage/            IndexedDB do site (presets) e localStorage (preferências)
   state/
     store.ts            estado central + sincronização com o Helper (fila serializada)
     status.ts           textos de status em pt-BR (funções puras)
@@ -73,7 +73,8 @@ Lista fechada de caminhos, só GET, sem credenciais. O Helper nunca participa.
 | Cloudflare **Pages** | Workers & Pages → Criar → aba **Pages** → *Upload de arquivos* (zip do build) | `_worker.js` dentro do build |
 | Cloudflare **Workers** | `npm run deploy:cloudflare` (usa `wrangler.jsonc`) | `public/_worker.js` como script do Worker |
 | Netlify | arrastar a pasta/zip do build | regras no `_redirects` |
-| Vercel | `vercel deploy dist` | `vercel.json` |
+| Vercel (pelo GitHub) | importar o repositório com **Root Directory = `site-src`** (Framework: Vite) | `vercel.json` + função `api/imtheo.mjs` da raiz do projeto |
+| Vercel (pasta pronta) | `vercel deploy` dentro da pasta `dist` (ou do zip extraído) | `dist/vercel.json` + `dist/api/imtheo.mjs` (copiados no build) |
 | GitHub Pages / estático puro | qualquer | sem proxy: só funciona se o serviço liberar CORS |
 
 O upload de arquivos no fluxo **Workers** do painel aceita só arquivos estáticos e
@@ -101,5 +102,13 @@ A gravação usa as rotas do Helper `/macro/record/*` (hook global do Windows).
 
 ### Dados do usuário
 
-Presets e cache de offsets: IndexedDB `gerenciador` (v2). Ações, atalhos e
+Offsets: **somente na memória da aba** (nada é gravado no computador; ao reabrir o site,
+ele consulta a versão de novo). Presets: IndexedDB `gerenciador` (v3). Ações, atalhos e
 preferências: localStorage. Presets do site antigo são migrados automaticamente.
+
+### Navegadores
+
+Chrome, Edge, Firefox, LibreWolf, Brave e Opera atuais. O CORS é igual em todos (por
+isso o proxy no hosting). Para falar com o Helper em `127.0.0.1`, alguns pedem
+permissão: Chrome/Edge ("acesso à rede local"), Brave ("localhost"), uBlock Origin
+(lista "Block Outsider Intrusion into LAN"). Safari não permite acesso ao localhost.
