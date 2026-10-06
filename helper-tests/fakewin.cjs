@@ -61,5 +61,5 @@ const koffi = {
   sizeof: () => 1080, address: (h) => BigInt(h?.h ?? 0), register: () => ({}), proto: () => ({}), unregister: () => {},
 };
 const orig = Module._load;
-Module._load = function (req, ...rest) { return req === 'koffi' || req === './koffi' ? koffi : orig.call(this, req, ...rest); };
+Module._load = function (req, ...rest) { return req === 'koffi' || req === './koffi' || req === './dp' ? koffi : orig.call(this, req, ...rest); };
 Object.defineProperty(process, 'platform', { value: 'win32' });
