@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "generatedAt": "2026-10-06T07:23:00Z",
+  "latest": "version-cec3ad5889b447cf",
+  "versions": [
+    {
+      "id": "version-02c37bc51a384b8f",
+      "robloxVersion": "version-02c37bc51a384b8f",
+      "flagCount": 14633,
+      "dumperVersion": "2.2.4",
+      "dumpDate": "2026-09-29T20:12:00Z",
+      "totalOffsets": 14636,
+      "file": "version-02c37bc51a384b8f.json"
+    },
+    {
+      "id": "version-cec3ad5889b447cf",
+      "robloxVersion": "version-cec3ad5889b447cf",
+      "flagCount": 14858,
+      "dumperVersion": "2.2.4",
+      "dumpDate": "2026-10-06T07:23:00Z",
+      "totalOffsets": 14861,
+      "file": "version-cec3ad5889b447cf.json"
+    }
+  ]
+}
