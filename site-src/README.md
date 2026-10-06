@@ -68,16 +68,23 @@ resposta. Se não responder, o site usa um proxy **do próprio hosting** na mesm
 origem (`/api/imtheo/roblox/version`, `/api/imtheo/offsets.json`, `/api/imtheo/FFlags.hpp`).
 Lista fechada de caminhos, só GET, sem credenciais. O Helper nunca participa.
 
-| Hosting | Arquivo (já incluso no build) |
-|---|---|
-| Cloudflare Pages | `_worker.js` + `_routes.json` (proxy com cache na borda) |
-| Netlify | `_redirects` (regras de proxy 200) |
-| Vercel | `vercel.json` (rewrites) |
-| GitHub Pages / outro estático puro | sem proxy: funciona só se o serviço liberar CORS |
+| Hosting | Como publicar | Proxy |
+|---|---|---|
+| Cloudflare **Pages** | Workers & Pages → Criar → aba **Pages** → *Upload de arquivos* (zip do build) | `_worker.js` dentro do build |
+| Cloudflare **Workers** | `npm run deploy:cloudflare` (usa `wrangler.jsonc`) | `public/_worker.js` como script do Worker |
+| Netlify | arrastar a pasta/zip do build | regras no `_redirects` |
+| Vercel | `vercel deploy dist` | `vercel.json` |
+| GitHub Pages / estático puro | qualquer | sem proxy: só funciona se o serviço liberar CORS |
+
+O upload de arquivos no fluxo **Workers** do painel aceita só arquivos estáticos:
+ele recusa `_routes.json`/`_worker.js` ("Pages _routes.json is not supported"). Por
+isso o build não tem `_routes.json` e traz um `.assetsignore` que faz esse fluxo
+ignorar o `_worker.js` (o site publica, mas sem o proxy). Para ter o proxy, use o
+Cloudflare **Pages** (upload do zip) ou `npm run deploy:cloudflare`.
 
 **Recomendado: Cloudflare Pages** — HTTPS automático, `_headers` já usado pelo site,
-proxy (`_worker.js`) funciona até no upload direto do zip, cache na borda e plano
-gratuito generoso. Netlify é a segunda opção (proxy por uma linha no `_redirects`).
+proxy (`_worker.js`) funciona no upload direto do zip e plano gratuito generoso.
+Netlify é a segunda opção (proxy por regras no `_redirects`).
 
 ### Ações e macros
 

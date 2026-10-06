@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "test:e2e": "node --test --test-concurrency=1 tests/e2e/site.e2e.mjs"
+    "test:e2e": "node --test --test-concurrency=1 tests/e2e/site.e2e.mjs",
+    "deploy:cloudflare": "npm run build && wrangler deploy"
   },
   "dependencies": {
     "lucide-react": "^1.52.0",
@@ -25,6 +26,7 @@
     "playwright-core": "^1.63.0",
     "typescript": "^5.9.3",
     "vite": "^5.4.21",
-    "vitest": "^2.1.9"
+    "vitest": "^2.1.9",
+    "wrangler": "^4.148.0"
   }
 }

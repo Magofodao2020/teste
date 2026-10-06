@@ -1,0 +1,14 @@
+// Publicação como Cloudflare Worker (static assets) com o proxy /api/imtheo/*.
+// Uso: npm run build && npx wrangler deploy
+// (Para Cloudflare Pages com upload do zip, este arquivo não é usado: o Pages
+//  executa o _worker.js que vai dentro do build.)
+{
+  "name": "painel-bope",
+  "main": "public/_worker.js",
+  "compatibility_date": "2025-06-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  }
+}
