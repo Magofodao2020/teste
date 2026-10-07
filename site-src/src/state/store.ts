@@ -9,6 +9,7 @@ import {
 } from '../core/macros';
 import { type FlagValue, cleanFlagName, toHelperValue } from '../core/flags';
 import { HelperClient, type HelperResult, type HelperStatus } from '../core/helper/client';
+import { OriginalsMemory } from '../core/helper/originals';
 import { buildIndex, type DatasetIndex } from '../core/offsets/dataset';
 import { OffsetService, type OffsetState } from '../core/offsets/service';
 import {
@@ -53,6 +54,8 @@ export class AppStore {
   private syncChain: Promise<unknown> = Promise.resolve();
   private offsetsPush: { version: string; startedAt: number | null; failedAt: number } | null = null;
   private toastSeq = 1;
+  /** Originais das flags por processo do Roblox — só em memória (ver core/helper/originals). */
+  private originals = new OriginalsMemory();
   private disposed = false;
   readonly helper: HelperClient;
   private offsetService: OffsetService | null = null;
@@ -172,13 +175,23 @@ export class AppStore {
 
   /** Lê o status do Helper agora (também usado antes de cada operação). */
   async pollHelper(): Promise<HelperStatus | null> {
-    const st = await this.helper.probe();
+    const probed = await this.helper.probe();
+    let st: HelperStatus | null = null;
+    if (probed) {
+      const { originals, ...rest } = probed;
+      this.originals.record(probed.flagSession, originals ?? []);
+      st = rest;
+    }
     const prev = this.state.helper;
     // Só notifica a interface quando algo mudou (evita re-render a cada 5 s).
     if (!this.state.helperChecked || JSON.stringify(prev) !== JSON.stringify(st)) this.set({ helper: st, helperChecked: true });
     if (!st) return null;
     const restarted = !prev || prev.port !== st.port || prev.startedAt !== st.startedAt;
     if (restarted) {
+      // Helper reaberto: devolve os valores padrão que o anterior tinha capturado
+      // neste mesmo Roblox, para pausar/desligar voltar ao padrão de verdade.
+      const sessions = this.originals.payload();
+      if (sessions.length) this.queue(() => this.helper.setOriginals(sessions));
       this.queue(() => this.pushMacros());
       this.queue(() => this.pushHotkeys());
     }

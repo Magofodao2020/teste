@@ -1,6 +1,8 @@
 // Cliente do Helper local (Node.js em 127.0.0.1). Só conversa com a máquina do
 // usuário; o Helper não tem internet e só usa o que o site envia.
 
+import { type FlagOriginal, parseOriginals } from './originals';
+
 export const HELPER_PORTS = [7962, 7963, 7964, 7965, 7966];
 const PROBE_TIMEOUT_MS = 800;
 const POST_TIMEOUT_MS = 8_000;
@@ -26,6 +28,9 @@ export interface HelperStatus {
   /** Versão dos offsets que o Helper recebeu do site (em memória). */
   siteOffsetsBuild: string | null;
   canApply: boolean;
+  /** Processo do Roblox (PID + horário de criação) e originais que o Helper capturou nele. */
+  flagSession?: string | null;
+  originals?: FlagOriginal[];
 }
 
 export interface RecordStatus {
@@ -61,6 +66,8 @@ export function parseStatus(port: number, s: Record<string, unknown>): HelperSta
     detection: det ? { state, version: str(det.version), reason: String(det.reason ?? '') } : null,
     siteOffsetsBuild: str(s.siteOffsetsBuild),
     canApply: !!s.canApply,
+    flagSession: str(s.flagSession),
+    originals: parseOriginals(s.originals),
   };
 }
 
@@ -112,6 +119,7 @@ export class HelperClient {
     return this.post('/set-offsets', { version, names, addresses }, BIG_POST_TIMEOUT_MS);
   }
   setMacros(macros: unknown[], settings: unknown) { return this.post('/set-macros', { macros, settings }); }
+  setOriginals(sessions: unknown[]) { return this.post('/set-originals', { sessions }); }
   setHotkeys(hotkeys: unknown, flags: Record<string, string>) { return this.post('/set-hotkeys', { hotkeys, flags }); }
   apply(flags: Record<string, string>, dumpVersion: string) { return this.post('/apply', { flags, dumpVersion }); }
   pause(flags: Record<string, string>, dumpVersion: string) { return this.post('/pause', { flags, dumpVersion }); }

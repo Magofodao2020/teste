@@ -50,3 +50,13 @@ test('valor do toggle achado pelo nome limpo', async () => {
   await press();
   assert.notEqual(val(), before, 'o toggle pelo nome sem prefixo funcionou');
 });
+
+test('/status expõe os originais e /set-originals devolve o padrão', async () => {
+  const st = await (await fetch(`http://127.0.0.1:${PORT}/status`)).json();
+  assert.ok(st.flagSession, 'sessão do processo');
+  const o = st.originals.find((x) => x.rva === 0x101200);
+  assert.equal(o.raw, '3c000000', 'padrão 60 guardado');
+  const r = await post('/set-originals', { sessions: [{ session: st.flagSession, items: [o] }] });
+  assert.equal(r.ok, true, r.message);
+  assert.equal(r.seeded, 1);
+});
