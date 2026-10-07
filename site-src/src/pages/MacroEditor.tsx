@@ -4,7 +4,7 @@ import {
 import { type ReactNode, useMemo, useState } from 'react';
 import {
   MODES, MOUSE_BUTTONS, type Macro, type MacroMode, type MacroStep, STEP_LABEL, STEP_TYPES, type StepType,
-  categoryNames, defaultStep, describeStep, macroMs, macroProblems, moveItem, sanitizeMacro, sanitizeStep,
+  defaultStep, describeStep, macroMs, macroProblems, moveItem, sanitizeMacro, sanitizeStep,
 } from '../core/macros';
 import { store, useApp } from '../state/store';
 import { Button, Card, Confirm, KeyCapture, Notice, Switch } from '../ui/components';
@@ -15,8 +15,7 @@ import { Button, Card, Confirm, KeyCapture, Notice, Switch } from '../ui/compone
  */
 export function MacroEditor({ initial, isNew, onClose }: { initial: Macro; isNew: boolean; onClose: () => void }) {
   const helper = useApp((s) => s.helper);
-  const allMacros = useApp((s) => s.macros.macros);
-  const existingCats = useMemo(() => categoryNames(allMacros), [allMacros]);
+  const categories = useApp((s) => s.macros.categories);
   const [m, setM] = useState<Macro>(() => structuredClone(initial));
   const [addType, setAddType] = useState<StepType>('key');
   const [dragFrom, setDragFrom] = useState<number | null>(null);
@@ -65,17 +64,11 @@ export function MacroEditor({ initial, isNew, onClose }: { initial: Macro; isNew
           </label>
           <label className="col">
             <span className="field-label">Categoria</span>
-            <input
-              className="input"
-              list="bope-categorias"
-              value={m.group ?? ''}
-              maxLength={40}
-              placeholder="Sem categoria"
-              onChange={(e) => patch({ group: e.target.value.trim() ? e.target.value : undefined })}
-              aria-label="Categoria da ação"
-            />
-            <datalist id="bope-categorias">{existingCats.map((c) => <option key={c} value={c} />)}</datalist>
-            <span className="faint" style={{ fontSize: 12 }}>Agrupa a ação na lista. Deixe em branco para ficar sem categoria.</span>
+            <select className="input" value={m.categoryId ?? ''} onChange={(e) => patch({ categoryId: e.target.value || null })} aria-label="Categoria da ação">
+              <option value="">Sem categoria</option>
+              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <span className="faint" style={{ fontSize: 12 }}>Escolha a pasta da ação. Crie novas categorias na aba Ações.</span>
           </label>
           <div className="col">
             <span className="field-label">Botão ou tecla que ativa</span>

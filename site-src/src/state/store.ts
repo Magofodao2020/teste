@@ -3,8 +3,9 @@
 
 import { useSyncExternalStore } from 'react';
 import {
-  type Macro, type MacrosState, TEMPLATES, defaultMacrosState, duplicateMacro, fromTemplate, newMacroId, removeMacro,
-  restoreMacrosState, setAllEnabled, setCategoryEnabled, setEnabled, renameCategory, toHelperMacro, upsertMacro,
+  type Macro, type MacrosState, type ImportedPack, TEMPLATES, addCategory, applyImport, defaultMacrosState, duplicateMacro,
+  fromTemplate, moveCategory, newMacroId, removeCategory, removeMacro, renameCategory, reorderMacro, restoreMacrosState,
+  setAllEnabled, setCategoryEnabled, setMacroCategory, setEnabled, toHelperMacro, upsertMacro,
 } from '../core/macros';
 import { type FlagValue, toHelperValue } from '../core/flags';
 import { HelperClient, type HelperResult, type HelperStatus } from '../core/helper/client';
@@ -413,27 +414,49 @@ export class AppStore {
     const m = this.state.macros.macros.find((x) => x.id === id);
     if (m) this.saveMacros(upsertMacro(this.state.macros, { ...m, trigger }));
   }
-  /** Move uma ação para uma categoria (vazio = sem categoria). */
-  setMacroCategory(id: string, group: string | null) {
-    const m = this.state.macros.macros.find((x) => x.id === id);
-    if (!m) return;
-    const g = group && group.trim() ? group.trim().slice(0, 40) : undefined;
-    this.saveMacros(upsertMacro(this.state.macros, { ...m, group: g }));
+  // ───── categorias (pastas) ─────
+  /** Move uma ação para outra categoria (null = sem categoria). */
+  setMacroCategory(id: string, categoryId: string | null) {
+    this.saveMacros(setMacroCategory(this.state.macros, id, categoryId));
+  }
+  /** Reordena uma ação dentro da própria categoria. */
+  reorderMacro(id: string, dir: -1 | 1) {
+    this.saveMacros(reorderMacro(this.state.macros, id, dir));
   }
   /** Ativa/desativa todas as ações de uma categoria (null = sem categoria). */
-  setCategoryEnabled(category: string | null, enabled: boolean) {
-    const next = setCategoryEnabled(this.state.macros, category, enabled);
+  setCategoryEnabled(categoryId: string | null, enabled: boolean) {
+    const next = setCategoryEnabled(this.state.macros, categoryId, enabled);
     this.saveMacros(next);
     if (enabled) {
-      const inCat = next.macros.filter((m) => (m.group && m.group.trim() ? m.group.trim() : null) === category);
+      const valid = new Set(next.categories.map((c) => c.id));
+      const inCat = next.macros.filter((m) => (m.categoryId && valid.has(m.categoryId) ? m.categoryId : null) === categoryId);
       const skipped = inCat.filter((m) => !m.enabled).length;
       if (skipped) this.toast('info', `${skipped} ${skipped === 1 ? 'ação sem botão ou sem etapas não foi ativada' : 'ações sem botão ou sem etapas não foram ativadas'}.`);
     }
   }
-  renameCategory(from: string, to: string) {
-    if (to.trim() === from) return;
-    this.saveMacros(renameCategory(this.state.macros, from, to));
-    this.toast('success', to.trim() ? `Categoria renomeada para "${to.trim().slice(0, 40)}".` : 'Categoria removida (ações ficaram sem categoria).');
+  /** Cria uma categoria nova (pasta vazia). */
+  addCategory(name: string): string {
+    const r = addCategory(this.state.macros, name);
+    this.saveMacros(r.state);
+    const created = r.state.categories.find((c) => c.id === r.id);
+    this.toast('success', `Categoria "${created?.name ?? name}" criada.`);
+    return r.id;
+  }
+  renameCategory(id: string, name: string) {
+    if (!name.trim()) return;
+    this.saveMacros(renameCategory(this.state.macros, id, name));
+  }
+  /** Exclui a categoria; as ações dentro dela ficam sem categoria (não são apagadas). */
+  removeCategory(id: string) {
+    const cat = this.state.macros.categories.find((c) => c.id === id);
+    const count = this.state.macros.macros.filter((m) => m.categoryId === id).length;
+    this.saveMacros(removeCategory(this.state.macros, id));
+    this.toast('success', count
+      ? `Categoria "${cat?.name ?? ''}" excluída · ${count} ${count === 1 ? 'ação ficou sem categoria' : 'ações ficaram sem categoria'}.`
+      : `Categoria "${cat?.name ?? ''}" excluída.`);
+  }
+  moveCategory(id: string, dir: -1 | 1) {
+    this.saveMacros(moveCategory(this.state.macros, id, dir));
   }
   /** Salva (cria ou atualiza). Macros novas entram desativadas. */
   saveMacro(m: Macro) {
@@ -449,15 +472,21 @@ export class AppStore {
   addTemplate(templateId: string) {
     const t = TEMPLATES.find((x) => x.id === templateId);
     if (!t) return;
-    const id = this.state.macros.macros.some((m) => m.id === t.id) ? newMacroId() : t.id;
-    this.saveMacros(upsertMacro(this.state.macros, fromTemplate(t, id)));
+    let st = this.state.macros;
+    // garante a categoria do modelo (Bug Indi / GK), criando se o usuário a tiver apagado
+    let catId = st.categories.find((c) => c.name.toLowerCase() === t.group.toLowerCase())?.id ?? null;
+    if (!catId) { const r = addCategory(st, t.group); st = r.state; catId = r.id; }
+    const id = st.macros.some((m) => m.id === t.id) ? newMacroId() : t.id;
+    this.saveMacros(upsertMacro(st, fromTemplate(t, catId, id)));
     this.toast('success', `Modelo "${t.pack.name}" adicionado · Status: desativada.`);
   }
-  importMacros(list: Macro[]) {
-    let st = this.state.macros;
-    for (const m of list) st = upsertMacro(st, { ...m, enabled: false });
-    this.saveMacros(st);
-    this.toast('success', `${list.length} ${list.length === 1 ? 'ação importada' : 'ações importadas'} · desativadas.`);
+  /** Importa um pacote (ações + categorias), sem apagar nada. mode: 'merge' | 'new'. */
+  importPack(pack: ImportedPack, mode: 'merge' | 'new') {
+    const r = applyImport(this.state.macros, pack, mode);
+    this.saveMacros(r.state);
+    const parts = [`${r.addedMacros} ${r.addedMacros === 1 ? 'ação importada' : 'ações importadas'} · desativadas`];
+    if (r.addedCategories) parts.push(`${r.addedCategories} ${r.addedCategories === 1 ? 'categoria criada' : 'categorias criadas'}`);
+    this.toast('success', parts.join(' · ') + '.');
   }
   setStopKey(code: string) { this.saveMacros({ ...this.state.macros, stopKey: code }); }
 

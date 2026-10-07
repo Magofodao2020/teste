@@ -1,7 +1,7 @@
 import { Circle, Copy, Download, Plus, Square, Upload } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
-  type Macro, TEMPLATES, describeStep, exportPack, parseMacroImport, sanitizeStep, triggerLabel, type MacroStep,
+  type ImportedPack, TEMPLATES, describeStep, importCollisions, parseMacroImport, sanitizeStep, triggerLabel, type MacroStep,
 } from '../core/macros';
 import { store, useApp } from '../state/store';
 import { Button, Modal, Notice } from '../ui/components';
@@ -127,12 +127,13 @@ export function RecorderDialog({ onClose, onRecorded }: { onClose: () => void; o
 // ───────── importar ─────────
 
 export function ImportMacrosDialog({ onClose }: { onClose: () => void }) {
+  const stateMacros = useApp((s) => s.macros);
   const [text, setText] = useState('');
-  const [parsed, setParsed] = useState<{ ok: true; macros: Macro[] } | { ok: false; error: string } | null>(null);
+  const [parsed, setParsed] = useState<{ ok: true; pack: ImportedPack } | { ok: false; error: string } | null>(null);
   useEffect(() => {
     if (!text.trim()) { setParsed(null); return; }
     let alive = true;
-    parseMacroImport(text).then((macros) => alive && setParsed({ ok: true, macros })).catch((e) => alive && setParsed({ ok: false, error: (e as Error).message }));
+    parseMacroImport(text).then((pack) => alive && setParsed({ ok: true, pack })).catch((e) => alive && setParsed({ ok: false, error: (e as Error).message }));
     return () => { alive = false; };
   }, [text]);
   const onFile = async (f: File | undefined) => {
@@ -140,21 +141,47 @@ export function ImportMacrosDialog({ onClose }: { onClose: () => void }) {
     if (f.size > 16 * 1024 * 1024) { store.toast('error', 'Arquivo grande demais.'); return; }
     setText(await f.text());
   };
+  const pack = parsed?.ok ? parsed.pack : null;
+  const collisions = pack ? importCollisions(stateMacros, pack) : [];
+  const run = (mode: 'merge' | 'new') => { if (pack) { store.importPack(pack, mode); onClose(); } };
+
   return (
     <Modal
       title="Importar ações"
       wide
       onClose={onClose}
-      footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={!parsed?.ok} onClick={() => { if (parsed?.ok) { store.importMacros(parsed.macros); onClose(); } }}>Importar {parsed?.ok ? parsed.macros.length : ''} (desativadas)</Button></>}
+      footer={!pack ? <Button onClick={onClose}>Cancelar</Button>
+        : collisions.length ? (
+          <>
+            <Button onClick={onClose}>Cancelar</Button>
+            <Button onClick={() => run('new')}>Criar como novas</Button>
+            <Button variant="primary" onClick={() => run('merge')}>Adicionar às existentes</Button>
+          </>
+        ) : (
+          <><Button onClick={onClose}>Cancelar</Button><Button variant="primary" onClick={() => run('merge')}>Importar {pack.items.length} (desativadas)</Button></>
+        )}
     >
-      <p className="muted" style={{ margin: 0 }}>Cole o JSON de uma ação ou pacote (<span className="mono">bope: macro / macro-pack</span>) ou um código <span className="mono">BOPE-SEQ1:</span> do site antigo.</p>
+      <p className="muted" style={{ margin: 0 }}>Cole o JSON de uma ação, pacote ou categoria (<span className="mono">bope: macro / macro-pack</span>) ou um código <span className="mono">BOPE-SEQ1:</span> do site antigo.</p>
       <label className="btn btn-sm" style={{ cursor: 'pointer', justifySelf: 'start' }}>
         <Upload /> Escolher arquivo
         <input type="file" accept=".json,.txt,application/json" className="sr-only" onChange={(e) => void onFile(e.target.files?.[0])} />
       </label>
-      <textarea className="textarea" value={text} onChange={(e) => setText(e.target.value)} aria-label="Dados para importar" spellCheck={false} placeholder='{"bope":"macro","v":1,"name":"Minha macro","steps":[...]}' />
+      <textarea className="textarea" value={text} onChange={(e) => setText(e.target.value)} aria-label="Dados para importar" spellCheck={false} placeholder='{"bope":"macro-pack","v":2,"categories":[{"name":"Combate"}],"macros":[...]}' />
       {parsed && (parsed.ok
-        ? <Notice tone="ok">{parsed.macros.length} {parsed.macros.length === 1 ? 'ação' : 'ações'}: {parsed.macros.map((m) => m.name).join(', ')}.{(() => { const c = [...new Set(parsed.macros.map((m) => m.group).filter(Boolean))]; return c.length ? ` Categoria(s): ${c.join(', ')}.` : ''; })()} Entram desativadas.</Notice>
+        ? (
+          <>
+            <Notice tone="ok">
+              {pack!.items.length} {pack!.items.length === 1 ? 'ação' : 'ações'}{pack!.items.length ? `: ${pack!.items.map((i) => i.macro.name).join(', ')}` : ''}.
+              {pack!.categories.length ? ` Categoria(s): ${pack!.categories.join(', ')}.` : ' Sem categoria.'} Entram desativadas.
+            </Notice>
+            {collisions.length > 0 && (
+              <Notice tone="warn">
+                Já existe {collisions.length === 1 ? 'a categoria' : 'as categorias'} <strong>{collisions.join(', ')}</strong>.
+                “Adicionar às existentes” coloca as ações dentro {collisions.length === 1 ? 'dela' : 'delas'}; “Criar como novas” cria categorias separadas. Nada é apagado.
+              </Notice>
+            )}
+          </>
+        )
         : <Notice tone="err">{parsed.error}</Notice>)}
     </Modal>
   );
@@ -162,12 +189,7 @@ export function ImportMacrosDialog({ onClose }: { onClose: () => void }) {
 
 // ───────── exportar ─────────
 
-export function ExportMacrosDialog({ macros, label, onClose }: { macros: Macro[]; label?: string; onClose: () => void }) {
-  const json = useMemo(() => exportPack(macros), [macros]);
-  const cats = useMemo(() => [...new Set(macros.map((m) => m.group).filter(Boolean))] as string[], [macros]);
-  const title = macros.length === 1 ? `Exportar “${macros[0].name}”`
-    : label && label !== 'todas' ? `Exportar categoria “${label}” (${macros.length} ${macros.length === 1 ? 'ação' : 'ações'})`
-      : `Exportar ${macros.length} ações`;
+export function ExportMacrosDialog({ title, json, filename, note, onClose }: { title: string; json: string; filename: string; note?: string; onClose: () => void }) {
   const copy = async () => {
     try { await navigator.clipboard.writeText(json); store.toast('success', 'JSON copiado.'); } catch { store.toast('error', 'Não foi possível copiar. Selecione o texto e copie manualmente.'); }
   };
@@ -175,17 +197,14 @@ export function ExportMacrosDialog({ macros, label, onClose }: { macros: Macro[]
     const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
     const a = document.createElement('a');
     a.href = url;
-    const base = macros.length === 1 ? macros[0].name
-      : label && label !== 'todas' ? `categoria-${label}`
-        : 'acoes-bope';
-    a.download = `${base.replace(/[^\w\- ]+/g, '').trim() || 'acoes'}.json`;
+    a.download = `${filename.replace(/[^\w\- ]+/g, '').trim() || 'acoes'}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   return (
     <Modal title={title} wide onClose={onClose} footer={<><Button icon={<Copy />} onClick={() => void copy()}>Copiar</Button><Button variant="primary" icon={<Download />} onClick={download}>Baixar .json</Button></>}>
       <p className="muted" style={{ margin: 0 }}>
-        A categoria de cada ação vai junto, então importar recria as categorias{cats.length ? ` (${cats.join(', ')})` : ''}. O estado ativa/desativada não é exportado: quem importar recebe as ações desativadas.
+        {note ?? 'A estrutura (categorias e ações) vai junto, então importar reconstrói as pastas.'} O estado ativa/desativada não é exportado: quem importar recebe as ações desativadas.
       </p>
       <textarea className="textarea" readOnly value={json} aria-label="JSON exportado" style={{ minHeight: 280 }} />
     </Modal>

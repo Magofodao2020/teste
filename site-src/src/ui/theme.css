@@ -272,6 +272,11 @@ button.keycap:hover { border-color: var(--gold); }
 .cat-toggle:hover { background: var(--surface); }
 .cat-name { font-weight: 700; font-size: 14.5px; overflow-wrap: anywhere; }
 .cat-body { padding: 10px 12px 12px; }
+.reorder { flex: none; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 20px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-2); color: var(--text-2); cursor: pointer; }
+.icon-btn:hover:not(:disabled) { border-color: var(--border-strong); color: var(--text); }
+.icon-btn:disabled { opacity: 0.35; cursor: default; }
+.move-select select { height: 30px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-2); color: var(--text); font-size: 12.5px; padding: 0 8px; max-width: 160px; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 16px 20px; align-items: start; }
 .num-field .input { max-width: 160px; font-family: var(--mono); font-size: 12.5px; }
 .step-card { display: grid; gap: 12px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-2); }

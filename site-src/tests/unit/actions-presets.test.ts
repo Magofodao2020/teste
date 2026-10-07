@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_PACK, canActivate, categoryNames, decodeShare, defaultMacrosState, duplicateMacro, exportPack, groupMacros, moveItem, parseMacroImport,
-  renameCategory, restoreMacrosState, sanitizeMacro, setAllEnabled, setCategoryEnabled, setEnabled, toHelperMacro, upsertMacro,
+  DEFAULT_PACK, addCategory, applyImport, canActivate, decodeShare, defaultMacrosState, duplicateMacro, exportAll, exportCategory,
+  groupMacros, importCollisions, moveCategory, moveItem, parseMacroImport, removeCategory, renameCategory, reorderMacro,
+  restoreMacrosState, sanitizeMacro, setAllEnabled, setCategoryEnabled, setEnabled, setMacroCategory, toHelperMacro, upsertMacro,
 } from '../../src/core/macros';
 import { buildIndex, parseSiteDataset } from '../../src/core/offsets/dataset';
 import {
@@ -18,9 +19,11 @@ describe('ações e macros', () => {
     expect(DEFAULT_PACK).toEqual(USER_PACK);
   });
 
-  it('primeira abertura: os cinco modelos configurados e NENHUM ativo', () => {
+  it('primeira abertura: categorias Bug Indi e GK, modelos dentro, nenhum ativo', () => {
     const st = defaultMacrosState();
-    expect(st.macros.map((m) => [m.name, m.trigger, m.group])).toEqual([
+    expect(st.categories.map((c) => c.name)).toEqual(['Bug Indi', 'GK']);
+    const nameOf = (id: string | null) => st.categories.find((c) => c.id === id)?.name ?? null;
+    expect(st.macros.map((m) => [m.name, m.trigger, nameOf(m.categoryId)])).toEqual([
       ['Bug Indi', 'MouseBack', 'Bug Indi'], ['Bug indi ESQUERDA', 'MouseForward', 'Bug Indi'], ['Bug indi DIREITA', 'MouseBack', 'Bug Indi'],
       ['Perfect Dive', 'MouseRight', 'GK'], ['Gagatech', 'MouseForward', 'GK'],
     ]);
@@ -107,49 +110,105 @@ describe('ações e macros', () => {
     expect(m.steps[1].hold).toBe(0);
   });
 
-  it('categorias: agrupa por "group" preservando a ordem, com bucket sem categoria', () => {
-    const st = defaultMacrosState();
-    const semCat = { ...st.macros[0], id: 'livre', name: 'Livre', group: undefined };
-    const groups = groupMacros([...st.macros, semCat]);
-    expect(groups.map((g) => [g.name, g.macros.length])).toEqual([['Bug Indi', 3], ['GK', 2], [null, 1]]);
-    expect(categoryNames([...st.macros, semCat])).toEqual(['Bug Indi', 'GK']);
+  const catId = (st: ReturnType<typeof defaultMacrosState>, name: string) => st.categories.find((c) => c.name === name)!.id;
+  const idToName = (st: ReturnType<typeof defaultMacrosState>) => (id: string | null) => st.categories.find((c) => c.id === id)?.name ?? null;
+
+  it('categorias: groupMacros devolve pastas na ordem + grupo "Sem categoria" por último', () => {
+    let st = defaultMacrosState();
+    st = upsertMacro(st, { ...st.macros[0], id: 'livre', name: 'Livre', categoryId: null });
+    const groups = groupMacros(st);
+    expect(groups.map((g) => [g.category?.name ?? null, g.macros.length])).toEqual([['Bug Indi', 3], ['GK', 2], [null, 1]]);
   });
 
-  it('ativar/desativar por categoria só afeta a categoria (e pula sem botão/etapas)', () => {
+  it('criar categoria vazia (nome único) e excluir devolve as ações para "Sem categoria"', () => {
     let st = defaultMacrosState();
-    st = setCategoryEnabled(st, 'GK', true);
-    expect(st.macros.filter((m) => m.enabled).map((m) => m.group)).toEqual(['GK', 'GK']);
-    st = upsertMacro(st, { ...st.macros[0], id: 'gk-sem-botao', name: 'Z', group: 'GK', trigger: null });
-    st = setCategoryEnabled(st, 'GK', true);
-    expect(st.macros.find((m) => m.id === 'gk-sem-botao')!.enabled).toBe(false); // sem botão não ativa
-    st = setCategoryEnabled(st, 'GK', false);
+    const r = addCategory(st, 'GK'); // nome colide → vira "GK (2)"
+    st = r.state;
+    expect(st.categories.map((c) => c.name)).toEqual(['Bug Indi', 'GK', 'GK (2)']);
+    expect(groupMacros(st).find((g) => g.category?.id === r.id)!.macros).toEqual([]); // vazia
+    // excluir a categoria GK: as 2 ações ficam sem categoria, não são apagadas
+    const gk = catId(st, 'GK');
+    st = removeCategory(st, gk);
+    expect(st.categories.some((c) => c.name === 'GK')).toBe(false);
+    const semCat = groupMacros(st).find((g) => g.category === null)!;
+    expect(semCat.macros.map((m) => m.name).sort()).toEqual(['Gagatech', 'Perfect Dive']);
+    expect(st.macros.length).toBe(5); // nenhuma ação apagada
+  });
+
+  it('mover ação entre categorias, deixar sem categoria e reordenar dentro da pasta', () => {
+    let st = defaultMacrosState();
+    st = setMacroCategory(st, 'perfect-dive', catId(st, 'Bug Indi'));
+    expect(idToName(st)(st.macros.find((m) => m.id === 'perfect-dive')!.categoryId)).toBe('Bug Indi');
+    st = setMacroCategory(st, 'perfect-dive', null); // sem categoria
+    expect(st.macros.find((m) => m.id === 'perfect-dive')!.categoryId).toBeNull();
+    // reordenar dentro de Bug Indi: sobe a 3ª para o topo, só troca com o vizinho do mesmo grupo
+    const before = groupMacros(st).find((g) => g.category?.name === 'Bug Indi')!.macros.map((m) => m.name);
+    expect(before).toEqual(['Bug Indi', 'Bug indi ESQUERDA', 'Bug indi DIREITA']);
+    st = reorderMacro(st, 'bug-indi-direita', -1);
+    const after = groupMacros(st).find((g) => g.category?.name === 'Bug Indi')!.macros.map((m) => m.name);
+    expect(after).toEqual(['Bug Indi', 'Bug indi DIREITA', 'Bug indi ESQUERDA']);
+  });
+
+  it('renomear/mover categoria; ativar/desativar por categoria pula sem botão', () => {
+    let st = defaultMacrosState();
+    st = renameCategory(st, catId(st, 'GK'), 'Goleiro');
+    expect(st.categories.map((c) => c.name)).toEqual(['Bug Indi', 'Goleiro']);
+    st = moveCategory(st, catId(st, 'Goleiro'), -1);
+    expect(st.categories.map((c) => c.name)).toEqual(['Goleiro', 'Bug Indi']);
+    st = setCategoryEnabled(st, catId(st, 'Goleiro'), true);
+    expect(st.macros.filter((m) => m.enabled).map((m) => m.name).sort()).toEqual(['Gagatech', 'Perfect Dive']);
+    st = upsertMacro(st, { ...st.macros[0], id: 'g-sem-botao', name: 'Z', categoryId: catId(st, 'Goleiro'), trigger: null });
+    st = setCategoryEnabled(st, catId(st, 'Goleiro'), true);
+    expect(st.macros.find((m) => m.id === 'g-sem-botao')!.enabled).toBe(false);
+    st = setCategoryEnabled(st, catId(st, 'Goleiro'), false);
     expect(st.macros.some((m) => m.enabled)).toBe(false);
   });
 
-  it('renomear categoria muda o group de todas as ações dela; vazio remove a categoria', () => {
-    let st = defaultMacrosState();
-    st = renameCategory(st, 'GK', 'Goleiro');
-    expect(st.macros.filter((m) => m.group === 'Goleiro').map((m) => m.name)).toEqual(['Perfect Dive', 'Gagatech']);
-    expect(st.macros.some((m) => m.group === 'GK')).toBe(false);
-    st = renameCategory(st, 'Goleiro', '   ');
-    expect(st.macros.filter((m) => m.name === 'Perfect Dive')[0].group).toBeUndefined();
+  it('exportar tudo preserva a estrutura; exportar uma categoria leva as ações; importar reconstrói', async () => {
+    const st = defaultMacrosState();
+    const all = JSON.parse(exportAll(st));
+    expect(all.categories.map((c: { name: string }) => c.name)).toEqual(['Bug Indi', 'GK']);
+    expect(all.macros.every((m: { category?: string }) => ['Bug Indi', 'GK'].includes(m.category!))).toBe(true);
+
+    const gkJson = exportCategory(st, catId(st, 'GK'));
+    const pack = await parseMacroImport(gkJson);
+    expect(pack.categories).toEqual(['GK']);
+    expect(pack.items.map((i) => [i.macro.name, i.categoryName])).toEqual([['Perfect Dive', 'GK'], ['Gagatech', 'GK']]);
+    expect(pack.items.every((i) => !i.macro.enabled)).toBe(true);
   });
 
-  it('exportar leva a categoria junto e importar a recria', async () => {
-    const st = defaultMacrosState();
-    const gk = st.macros.filter((m) => m.group === 'GK');
-    const json = exportPack(gk);
-    expect(JSON.parse(json).category).toBe('GK');
-    const back = await parseMacroImport(json);
-    expect(back.map((m) => [m.name, m.group])).toEqual([['Perfect Dive', 'GK'], ['Gagatech', 'GK']]);
-    expect(back.every((m) => !m.enabled)).toBe(true);
+  it('importar categoria existente: "merge" adiciona dentro; "new" cria separada; nada é apagado', async () => {
+    const base = defaultMacrosState();
+    const pack = await parseMacroImport(exportCategory(base, catId(base, 'GK')));
+    expect(importCollisions(base, pack)).toEqual(['GK']);
+
+    const merged = applyImport(base, pack, 'merge').state;
+    expect(merged.categories.map((c) => c.name)).toEqual(['Bug Indi', 'GK']); // não cria categoria nova
+    expect(merged.macros.length).toBe(7); // 5 + 2 importadas (ids novos)
+
+    const asNew = applyImport(base, pack, 'new').state;
+    expect(asNew.categories.map((c) => c.name)).toEqual(['Bug Indi', 'GK', 'GK (2)']);
+    expect(asNew.macros.length).toBe(7);
+  });
+
+  it('migração v3 (categoria como texto "group") vira categorias-entidade', () => {
+    const v3 = { v: 3, stopKey: 'F8', macros: [
+      { id: 'a', name: 'A', group: 'Movimento', trigger: 'KeyA', steps: [{ t: 'key', code: 'KeyE' }] },
+      { id: 'b', name: 'B', group: 'Combate', trigger: 'KeyB', steps: [{ t: 'key', code: 'KeyE' }] },
+      { id: 'c', name: 'C', trigger: 'KeyC', steps: [{ t: 'key', code: 'KeyE' }] },
+    ] };
+    const st = restoreMacrosState(v3);
+    expect(st.v).toBe(4);
+    expect(st.categories.map((c) => c.name)).toEqual(['Movimento', 'Combate']);
+    const name = idToName(st);
+    expect(st.macros.map((m) => [m.name, name(m.categoryId)])).toEqual([['A', 'Movimento'], ['B', 'Combate'], ['C', null]]);
   });
 
   it('importação: JSON, pacote e código BOPE-SEQ1 do site antigo — sempre desativadas, sem AHK', async () => {
     const one = { bope: 'macro', v: 1, name: 'A', trigger: 'KeyA', steps: [{ t: 'key', code: 'KeyE' }] };
-    expect((await parseMacroImport(JSON.stringify(one)))[0]).toMatchObject({ name: 'A', enabled: false });
+    expect((await parseMacroImport(JSON.stringify(one))).items[0].macro).toMatchObject({ name: 'A', enabled: false });
     const pack = JSON.stringify({ bope: 'macro-pack', v: 1, macros: [one, { ...one, name: 'Flick Up (AHK)' }] });
-    expect((await parseMacroImport(pack)).map((m) => m.name)).toEqual(['A']);
+    expect((await parseMacroImport(pack)).items.map((i) => i.macro.name)).toEqual(['A']);
     const code = 'BOPE-SEQ1:' + btoa(JSON.stringify(one)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     expect((await decodeShare(code)) as { name: string }).toMatchObject({ name: 'A' });
     await expect(parseMacroImport('{"name":"sem etapas"}')).rejects.toThrow(/Nenhuma ação válida/);

@@ -216,11 +216,11 @@ describe('ações e macros', () => {
     await row(page, 'Perfect Dive').getByRole('button', { name: 'Desativar', exact: true }).click();
     await waitFor(() => enabledIds().length === 0);
 
-    await page.getByRole('button', { name: 'Ativar todas', exact: true }).click();
+    await page.getByRole('button', { name: 'Ativar tudo', exact: true }).click();
     await waitFor(() => enabledIds().length === 5);
     assert.equal(await page.getByText('● Ativa').count(), 5);
-    assert.equal(await page.getByRole('button', { name: 'Ativar todas', exact: true }).isDisabled(), true);
-    await page.getByRole('button', { name: 'Desativar todas', exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: 'Ativar tudo', exact: true }).isDisabled(), true);
+    await page.getByRole('button', { name: 'Desativar tudo', exact: true }).click();
     await waitFor(() => enabledIds().length === 0);
     assert.equal(await page.getByText('○ Desativada').count(), 5);
 
@@ -447,40 +447,61 @@ describe('ações e macros', () => {
     await ctx.close();
   });
 
-  it('categorias: retrair/abrir, ativar categoria, mover por categoria no editor e exportar com as ações', async () => {
+  it('categorias como pastas: criar, retrair, ativar todas, mover ação, excluir (sem apagar ação), exportar', async () => {
     const { page, ctx } = await open({ [LIVE_URL]: { body: V_SITE } });
     await page.goto(`${SITE}#/acoes`);
     const cat = (name) => page.locator('.cat-group', { has: page.locator('.cat-name', { hasText: new RegExp(`^${name}$`) }) });
-    // Modelos já vêm em duas categorias
-    assert.deepEqual(await page.locator('.cat-name').allInnerTexts(), ['Bug Indi', 'GK']);
+    const names = () => page.locator('.cat-name').allInnerTexts();
+    assert.deepEqual(await names(), ['Bug Indi', 'GK']);
 
-    // Retrair GK esconde as ações dela; abrir mostra de novo
+    // Criar categoria
+    await page.getByRole('button', { name: 'Criar categoria' }).click();
+    await page.getByLabel('Nome da categoria').fill('Testes');
+    await page.getByRole('button', { name: 'Criar', exact: true }).click();
+    await waitFor(async () => (await names()).includes('Testes'));
+
+    // Retrair GK esconde as ações; abrir mostra de novo
     assert.equal(await cat('GK').locator('.macro-row').count(), 2);
     await cat('GK').locator('.cat-toggle').click();
     await waitFor(async () => (await cat('GK').locator('.macro-row').count()) === 0);
     await cat('GK').locator('.cat-toggle').click();
     await waitFor(async () => (await cat('GK').locator('.macro-row').count()) === 2);
 
-    // Ativar categoria GK ativa só as duas ações de GK
-    await cat('GK').getByRole('button', { name: 'Ativar categoria', exact: true }).click();
+    // Ativar todas da categoria GK ativa só as duas de GK
+    await cat('GK').getByRole('button', { name: 'Ativar todas', exact: true }).click();
     await waitFor(() => enabledIds().join() === 'gagatech,perfect-dive');
-    await cat('GK').getByRole('button', { name: 'Desativar categoria', exact: true }).click();
+    await cat('GK').getByRole('button', { name: 'Desativar todas', exact: true }).click();
     await waitFor(() => enabledIds().length === 0);
 
-    // Mover "Bug Indi" para uma categoria nova pelo editor
-    await row(page, 'Bug Indi').getByRole('button', { name: 'Editar' }).click();
-    await page.getByLabel('Categoria da ação').fill('Testes');
-    await page.getByRole('button', { name: 'Salvar' }).click();
-    // Categoria é conceito só do site (não vai ao Helper): confere pelo DOM.
-    await waitFor(async () => (await cat('Testes').locator('.macro-name').allInnerTexts()).join() === 'Bug Indi');
-    assert.equal(await cat('Bug Indi').locator('.macro-row').count(), 2);
+    // Mover "Perfect Dive" para Testes pelo dropdown da linha (sem abrir o editor)
+    await row(page, 'Perfect Dive').getByRole('combobox', { name: 'Mover Perfect Dive para categoria' }).selectOption({ label: 'Testes' });
+    await waitFor(async () => (await cat('Testes').locator('.macro-name').allInnerTexts()).join() === 'Perfect Dive');
+    assert.equal(await cat('GK').locator('.macro-row').count(), 1);
 
-    // Exportar a categoria GK: o JSON leva as ações dela e a categoria
+    // Tirar "Perfect Dive" da categoria (fica em "Sem categoria", não some)
+    await row(page, 'Perfect Dive').getByRole('combobox', { name: 'Mover Perfect Dive para categoria' }).selectOption({ label: 'Sem categoria' });
+    const semcat = () => page.locator('.cat-group', { has: page.locator('.cat-name', { hasText: /^Sem categoria$/ }) });
+    await waitFor(async () => (await semcat().locator('.macro-name').allInnerTexts()).includes('Perfect Dive'));
+
+    // Exportar a categoria GK: o JSON leva a estrutura e as ações dela
     await cat('GK').getByRole('button', { name: 'Exportar categoria GK' }).click();
-    const json = await page.getByLabel('JSON exportado').inputValue();
-    const pack = JSON.parse(json);
-    assert.equal(pack.category, 'GK');
-    assert.deepEqual(pack.macros.map((m) => [m.name, m.group]), [['Perfect Dive', 'GK'], ['Gagatech', 'GK']]);
+    const pack = JSON.parse(await page.getByLabel('JSON exportado').inputValue());
+    assert.deepEqual(pack.categories, [{ name: 'GK' }]);
+    assert.deepEqual(pack.macros.map((m) => [m.name, m.category]), [['Gagatech', 'GK']]);
+    await page.locator('.modal').getByRole('button', { name: 'Fechar' }).click();
+    await page.locator('.overlay').waitFor({ state: 'detached' });
+
+    // Excluir a categoria "Testes" (vazia agora): some a pasta, nada quebra
+    await cat('Testes').getByRole('button', { name: 'Excluir categoria Testes' }).click();
+    await page.getByRole('button', { name: 'Excluir categoria', exact: true }).click();
+    await waitFor(async () => !(await names()).includes('Testes'));
+
+    // Excluir "Bug Indi" (com 3 ações): elas vão para "Sem categoria", não são apagadas
+    await cat('Bug Indi').getByRole('button', { name: 'Excluir categoria Bug Indi' }).click();
+    await page.getByRole('button', { name: 'Excluir categoria', exact: true }).click();
+    await waitFor(async () => !(await names()).includes('Bug Indi'));
+    await waitFor(() => (helper.state.macros ?? []).length === 5); // nenhuma ação apagada
+    await waitFor(async () => (await semcat().locator('.macro-row').count()) >= 4); // 3 do Bug Indi + Perfect Dive
     await ctx.close();
   });
 

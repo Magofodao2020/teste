@@ -1,9 +1,10 @@
 import {
-  ChevronDown, ChevronRight, Circle, Copy, Crosshair, Download, FolderOpen, LayoutTemplate, Pencil, Play, Plus, Power, PowerOff, Square, Trash2, TriangleAlert, Upload,
+  ArrowDown, ArrowUp, ChevronDown, ChevronRight, Circle, Copy, Crosshair, Download, FolderPlus, FolderOpen, LayoutTemplate, Pencil, Play, Plus, Power, PowerOff, Square, Trash2, TriangleAlert, Upload,
 } from 'lucide-react';
 import { useState } from 'react';
 import {
-  type Macro, type MacroGroup, type MacroStep, MODES, activeConflicts, canActivate, describeStep, groupMacros, macroMs, newMacroId, triggerLabel,
+  type Category, type Macro, type MacroGroup, type MacroStep, MODES, activeConflicts, canActivate, describeStep,
+  exportAll, exportCategory, exportMacro, groupMacros, macroMs, newMacroId, triggerLabel,
 } from '../core/macros';
 import { store, useApp } from '../state/store';
 import {
@@ -15,15 +16,17 @@ import { ExportMacrosDialog, ImportMacrosDialog, RecorderDialog, TemplatesDialog
 type Editing = { macro: Macro; isNew: boolean } | null;
 type Dialog =
   | { kind: 'record' } | { kind: 'import' } | { kind: 'templates' }
-  | { kind: 'export'; macros: Macro[]; label?: string } | { kind: 'delete'; macro: Macro }
-  | { kind: 'rename-cat'; from: string } | null;
+  | { kind: 'export'; title: string; json: string; filename: string; note?: string }
+  | { kind: 'delete'; macro: Macro }
+  | { kind: 'create-cat' } | { kind: 'rename-cat'; cat: Category } | { kind: 'delete-cat'; cat: Category; count: number }
+  | null;
 
-function blankMacro(steps: MacroStep[] = [], name = 'Nova ação'): Macro {
+function blankMacro(steps: MacroStep[] = [], name = 'Nova ação', categoryId: string | null = null): Macro {
   const now = Date.now();
-  return { id: newMacroId(), name, enabled: false, trigger: null, mode: 'once', repeat: 1, loopDelay: 0, speed: 1, robloxOnly: true, steps, createdAt: now, updatedAt: now };
+  return { id: newMacroId(), name, categoryId, enabled: false, trigger: null, mode: 'once', repeat: 1, loopDelay: 0, speed: 1, robloxOnly: true, steps, createdAt: now, updatedAt: now };
 }
 
-// Quais categorias estão retraídas (só conveniência visual, por navegador).
+const safe = (s: string) => s.replace(/[/\\]+/g, '-');
 const COLLAPSE_KEY = 'bope:acoes:collapsed:v1';
 function loadCollapsed(): Set<string> {
   try { const a = JSON.parse(localStorage.getItem(COLLAPSE_KEY) || '[]'); return new Set(Array.isArray(a) ? a.map(String) : []); } catch { return new Set(); }
@@ -52,7 +55,8 @@ export function AcoesPage() {
   const active = state.macros.filter((m) => m.enabled).length;
   const activatable = state.macros.filter(canActivate).length;
   const allActive = activatable > 0 && state.macros.filter(canActivate).every((m) => m.enabled);
-  const groups = groupMacros(state.macros);
+  const groups = groupMacros(state);
+  const nCats = state.categories.length;
 
   return (
     <div className="page">
@@ -67,47 +71,55 @@ export function AcoesPage() {
             <div className="row" style={{ gap: 14, alignItems: 'baseline' }}>
               <span aria-live="polite"><strong style={{ fontSize: 20 }}>{active}</strong> <span className="muted">{active === 1 ? 'ativa' : 'ativas'}</span></span>
               <span><strong style={{ fontSize: 20 }}>{total - active}</strong> <span className="muted">{total - active === 1 ? 'desativada' : 'desativadas'}</span></span>
-              <span><strong style={{ fontSize: 20 }}>{groups.length}</strong> <span className="muted">{groups.length === 1 ? 'categoria' : 'categorias'}</span></span>
+              <span><strong style={{ fontSize: 20 }}>{nCats}</strong> <span className="muted">{nCats === 1 ? 'categoria' : 'categorias'}</span></span>
             </div>
           </div>
           <div className="row wrap">
-            <Button variant={allActive ? 'default' : 'primary'} icon={<Power />} disabled={!activatable || allActive} onClick={() => store.setAllMacrosEnabled(true)}>Ativar todas</Button>
-            <Button icon={<PowerOff />} disabled={active === 0} onClick={() => store.setAllMacrosEnabled(false)}>Desativar todas</Button>
+            <Button variant={allActive ? 'default' : 'primary'} icon={<Power />} disabled={!activatable || allActive} onClick={() => store.setAllMacrosEnabled(true)}>Ativar tudo</Button>
+            <Button icon={<PowerOff />} disabled={active === 0} onClick={() => store.setAllMacrosEnabled(false)}>Desativar tudo</Button>
           </div>
         </div>
         <div className="divider" style={{ margin: '16px 0' }} />
         <div className="row wrap">
           <Button variant="primary" icon={<Plus />} onClick={() => setEditing({ macro: blankMacro(), isNew: true })}>Criar ação</Button>
+          <Button icon={<FolderPlus />} onClick={() => setDialog({ kind: 'create-cat' })}>Criar categoria</Button>
           <Button icon={<Circle />} onClick={() => setDialog({ kind: 'record' })}>Gravar macro</Button>
           <Button variant="ghost" icon={<LayoutTemplate />} onClick={() => setDialog({ kind: 'templates' })}>Modelos</Button>
           <Button variant="ghost" icon={<Upload />} onClick={() => setDialog({ kind: 'import' })}>Importar</Button>
-          <Button variant="ghost" icon={<Download />} disabled={!total} onClick={() => setDialog({ kind: 'export', macros: state.macros, label: 'todas' })}>Exportar todas</Button>
+          <Button variant="ghost" icon={<Download />} disabled={!total && !nCats} onClick={() => setDialog({ kind: 'export', title: 'Exportar tudo', json: exportAll(state), filename: 'acoes-bope' })}>Exportar todas</Button>
         </div>
-        <p className="faint" style={{ margin: '10px 0 0', fontSize: 12.5 }}>Defina a categoria de cada ação no editor. Exportar/importar uma categoria leva junto todas as ações dentro dela.</p>
       </Card>
 
       <section className="col" style={{ gap: 14 }}>
-        <div className="eyebrow">Minhas ações</div>
-        {total === 0 ? (
+        {total === 0 && nCats === 0 ? (
           <Card>
-            <Empty icon={<Crosshair />} title="Nenhuma ação">Crie uma ação, grave uma macro ou adicione um dos modelos (Bug Indi, Perfect Dive, Gagatech…).</Empty>
+            <Empty icon={<Crosshair />} title="Nenhuma ação">Crie uma ação, uma categoria, grave uma macro ou adicione um dos modelos (Bug Indi, Perfect Dive, Gagatech…).</Empty>
           </Card>
         ) : (
-          groups.map((g) => (
-            <CategorySection
-              key={g.key}
-              group={g}
-              allMacros={state.macros}
-              helperOn={!!helper}
-              collapsed={collapsed.has(g.key)}
-              onToggle={() => toggle(g.key)}
-              onExport={() => setDialog({ kind: 'export', macros: g.macros, label: g.name ?? 'Sem categoria' })}
-              onRename={(from) => setDialog({ kind: 'rename-cat', from })}
-              onEditMacro={(m) => setEditing({ macro: m, isNew: false })}
-              onExportMacro={(m) => setDialog({ kind: 'export', macros: [m] })}
-              onDeleteMacro={(m) => setDialog({ kind: 'delete', macro: m })}
-            />
-          ))
+          groups.map((g) => {
+            const key = g.category ? g.category.id : 'uncat';
+            if (!g.category && g.macros.length === 0) return null; // "Sem categoria" só aparece com ações
+            return (
+              <CategorySection
+                key={key}
+                group={g}
+                categories={state.categories}
+                allMacros={state.macros}
+                helperOn={!!helper}
+                collapsed={collapsed.has(key)}
+                onToggle={() => toggle(key)}
+                onNewMacro={() => setEditing({ macro: blankMacro([], 'Nova ação', g.category?.id ?? null), isNew: true })}
+                onExport={() => g.category
+                  ? setDialog({ kind: 'export', title: `Exportar categoria “${g.category.name}”`, json: exportCategory(state, g.category.id), filename: `categoria-${safe(g.category.name)}` })
+                  : setDialog({ kind: 'export', title: 'Exportar “Sem categoria”', json: exportCategory(state, null), filename: 'sem-categoria' })}
+                onRename={(cat) => setDialog({ kind: 'rename-cat', cat })}
+                onDelete={(cat) => setDialog({ kind: 'delete-cat', cat, count: g.macros.length })}
+                onEditMacro={(m) => setEditing({ macro: m, isNew: false })}
+                onExportMacro={(m) => setDialog({ kind: 'export', title: `Exportar “${m.name}”`, json: exportMacro(m), filename: m.name, note: 'Exporta só esta ação (sem categoria).' })}
+                onDeleteMacro={(m) => setDialog({ kind: 'delete', macro: m })}
+              />
+            );
+          })
         )}
       </section>
 
@@ -135,8 +147,14 @@ export function AcoesPage() {
       )}
       {dialog?.kind === 'import' && <ImportMacrosDialog onClose={close} />}
       {dialog?.kind === 'templates' && <TemplatesDialog onClose={close} />}
-      {dialog?.kind === 'export' && <ExportMacrosDialog macros={dialog.macros} label={dialog.label} onClose={close} />}
-      {dialog?.kind === 'rename-cat' && <RenameCategoryDialog from={dialog.from} onClose={close} />}
+      {dialog?.kind === 'export' && <ExportMacrosDialog title={dialog.title} json={dialog.json} filename={dialog.filename} note={dialog.note} onClose={close} />}
+      {dialog?.kind === 'create-cat' && <CategoryNameDialog title="Criar categoria" confirmLabel="Criar" onConfirm={(name) => store.addCategory(name)} onClose={close} />}
+      {dialog?.kind === 'rename-cat' && <CategoryNameDialog title={`Renomear “${dialog.cat.name}”`} confirmLabel="Salvar" initial={dialog.cat.name} onConfirm={(name) => store.renameCategory(dialog.cat.id, name)} onClose={close} />}
+      {dialog?.kind === 'delete-cat' && (
+        <Confirm title="Excluir categoria" danger confirmLabel="Excluir categoria" onConfirm={() => store.removeCategory(dialog.cat.id)} onClose={close}>
+          <p style={{ margin: 0 }}>Excluir a categoria <strong>{dialog.cat.name}</strong>?{dialog.count > 0 ? <> As {dialog.count} {dialog.count === 1 ? 'ação dentro dela volta' : 'ações dentro dela voltam'} para <strong>Sem categoria</strong> — nenhuma ação é apagada.</> : ''}</p>
+        </Confirm>
+      )}
       {dialog?.kind === 'delete' && (
         <Confirm title="Excluir ação" danger confirmLabel="Excluir" onConfirm={() => store.deleteMacro(dialog.macro.id)} onClose={close}>
           <p style={{ margin: 0 }}>Excluir <strong>{dialog.macro.name}</strong>? Não dá para desfazer (os modelos podem ser adicionados de novo em “Modelos”).</p>
@@ -146,17 +164,17 @@ export function AcoesPage() {
   );
 }
 
-function CategorySection({ group, allMacros, helperOn, collapsed, onToggle, onExport, onRename, onEditMacro, onExportMacro, onDeleteMacro }: {
-  group: MacroGroup; allMacros: ReturnType<typeof groupMacros>[number]['macros']; helperOn: boolean;
-  collapsed: boolean; onToggle: () => void; onExport: () => void; onRename: (from: string) => void;
+function CategorySection({ group, categories, allMacros, helperOn, collapsed, onToggle, onNewMacro, onExport, onRename, onDelete, onEditMacro, onExportMacro, onDeleteMacro }: {
+  group: MacroGroup; categories: Category[]; allMacros: Macro[]; helperOn: boolean; collapsed: boolean;
+  onToggle: () => void; onNewMacro: () => void; onExport: () => void; onRename: (c: Category) => void; onDelete: (c: Category) => void;
   onEditMacro: (m: Macro) => void; onExportMacro: (m: Macro) => void; onDeleteMacro: (m: Macro) => void;
 }) {
-  const { name, macros } = group;
+  const { category, macros } = group;
   const active = macros.filter((m) => m.enabled).length;
   const activatable = macros.filter(canActivate).length;
   const allActive = activatable > 0 && macros.filter(canActivate).every((m) => m.enabled);
-  const label = name ?? 'Sem categoria';
-  const state = { v: 3 as const, macros: allMacros, stopKey: '' };
+  const label = category ? category.name : 'Sem categoria';
+  const catId = category ? category.id : null;
 
   return (
     <div className={`cat-group ${active ? 'has-active' : ''}`}>
@@ -169,61 +187,72 @@ function CategorySection({ group, allMacros, helperOn, collapsed, onToggle, onEx
           {active > 0 && <span className="tag green">{active} ativa{active > 1 ? 's' : ''}</span>}
         </button>
         <div className="row wrap" style={{ gap: 6 }}>
-          <Button size="sm" variant={allActive ? 'default' : 'primary'} icon={<Power />} disabled={!activatable || allActive} onClick={() => store.setCategoryEnabled(name, true)}>Ativar categoria</Button>
-          <Button size="sm" icon={<PowerOff />} disabled={active === 0} onClick={() => store.setCategoryEnabled(name, false)}>Desativar categoria</Button>
+          <Button size="sm" variant={allActive ? 'default' : 'primary'} icon={<Power />} disabled={!activatable || allActive} onClick={() => store.setCategoryEnabled(catId, true)}>Ativar todas</Button>
+          <Button size="sm" icon={<PowerOff />} disabled={active === 0} onClick={() => store.setCategoryEnabled(catId, false)}>Desativar todas</Button>
+          <Button size="sm" variant="ghost" icon={<Plus />} onClick={onNewMacro} aria-label={`Nova ação em ${label}`} title="Criar ação nesta categoria" />
           <Button size="sm" variant="ghost" icon={<Download />} onClick={onExport} aria-label={`Exportar categoria ${label}`} title="Exportar categoria (com as ações dentro)" />
-          {name && <Button size="sm" variant="ghost" icon={<Pencil />} onClick={() => onRename(name)} aria-label={`Renomear categoria ${label}`} title="Renomear categoria" />}
+          {category && <Button size="sm" variant="ghost" icon={<Pencil />} onClick={() => onRename(category)} aria-label={`Renomear categoria ${label}`} title="Renomear categoria" />}
+          {category && <Button size="sm" variant="ghost" icon={<Trash2 />} onClick={() => onDelete(category)} aria-label={`Excluir categoria ${label}`} title="Excluir categoria (as ações ficam sem categoria)" />}
         </div>
       </div>
       {!collapsed && (
         <div className="col cat-body" style={{ gap: 10 }}>
-          {macros.map((m) => (
-            <MacroRow
-              key={m.id}
-              m={m}
-              conflicts={activeConflicts(state, m)}
-              helperOn={helperOn}
-              onEdit={() => onEditMacro(m)}
-              onExport={() => onExportMacro(m)}
-              onDelete={() => onDeleteMacro(m)}
-            />
-          ))}
+          {macros.length === 0
+            ? <p className="faint" style={{ margin: 0, fontSize: 12.5 }}>Categoria vazia. Use “Mover para…” em uma ação ou o <strong>+</strong> acima para criar uma aqui.</p>
+            : macros.map((m, i) => (
+              <MacroRow
+                key={m.id}
+                m={m}
+                categories={categories}
+                conflicts={activeConflicts({ v: 4, categories, macros: allMacros, stopKey: '' }, m)}
+                helperOn={helperOn}
+                isFirst={i === 0}
+                isLast={i === macros.length - 1}
+                onEdit={() => onEditMacro(m)}
+                onExport={() => onExportMacro(m)}
+                onDelete={() => onDeleteMacro(m)}
+              />
+            ))}
         </div>
       )}
     </div>
   );
 }
 
-function RenameCategoryDialog({ from, onClose }: { from: string; onClose: () => void }) {
-  const [name, setName] = useState(from);
+function CategoryNameDialog({ title, confirmLabel, initial = '', onConfirm, onClose }: { title: string; confirmLabel: string; initial?: string; onConfirm: (name: string) => void; onClose: () => void }) {
+  const [name, setName] = useState(initial);
+  const ok = name.trim().length > 0;
+  const submit = () => { if (ok) { onConfirm(name.trim()); onClose(); } };
   return (
     <Modal
-      title={`Renomear categoria “${from}”`}
+      title={title}
       onClose={onClose}
-      footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" onClick={() => { store.renameCategory(from, name); onClose(); }}>Salvar</Button></>}
+      footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={!ok} onClick={submit}>{confirmLabel}</Button></>}
     >
       <label className="col">
         <span className="field-label">Nome da categoria</span>
-        <input className="input" value={name} maxLength={40} autoFocus onChange={(e) => setName(e.target.value)} aria-label="Novo nome da categoria" placeholder="Deixe em branco para remover a categoria" />
+        <input className="input" value={name} maxLength={40} autoFocus onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} aria-label="Nome da categoria" placeholder="Ex.: Movimento, Combate, GK…" />
       </label>
-      <p className="faint" style={{ margin: 0, fontSize: 12.5 }}>Muda a categoria de todas as ações deste grupo. Em branco, elas ficam sem categoria.</p>
     </Modal>
   );
 }
 
-function MacroRow({ m, conflicts, helperOn, onEdit, onExport, onDelete }: {
-  m: Macro; conflicts: Macro[]; helperOn: boolean; onEdit: () => void; onExport: () => void; onDelete: () => void;
+function MacroRow({ m, categories, conflicts, helperOn, isFirst, isLast, onEdit, onExport, onDelete }: {
+  m: Macro; categories: Category[]; conflicts: Macro[]; helperOn: boolean; isFirst: boolean; isLast: boolean;
+  onEdit: () => void; onExport: () => void; onDelete: () => void;
 }) {
   const mode = MODES.find(([v]) => v === m.mode)?.[1] ?? m.mode;
   const ready = canActivate(m);
   return (
     <article className={`macro-row ${m.enabled ? 'on' : ''}`} aria-label={m.name}>
       <div className="macro-main">
+        <div className="col reorder" style={{ gap: 2 }}>
+          <button type="button" className="icon-btn" disabled={isFirst} onClick={() => store.reorderMacro(m.id, -1)} aria-label={`Subir ${m.name}`} title="Subir"><ArrowUp size={14} /></button>
+          <button type="button" className="icon-btn" disabled={isLast} onClick={() => store.reorderMacro(m.id, 1)} aria-label={`Descer ${m.name}`} title="Descer"><ArrowDown size={14} /></button>
+        </div>
         <span className={`status-pill ${m.enabled ? 'on' : 'off'}`} aria-label={m.enabled ? 'Ativa' : 'Desativada'}>{m.enabled ? '● Ativa' : '○ Desativada'}</span>
-        <div className="col" style={{ gap: 2, minWidth: 0, flex: '1 1 200px' }}>
-          <span className="row" style={{ gap: 8, minWidth: 0 }}>
-            <strong className="macro-name">{m.name}</strong>
-          </span>
+        <div className="col" style={{ gap: 2, minWidth: 0, flex: '1 1 180px' }}>
+          <strong className="macro-name">{m.name}</strong>
           <span className="faint truncate" style={{ fontSize: 12 }} title={m.steps.map(describeStep).join('\n')}>
             {mode}{m.mode === 'once' && m.repeat > 1 ? ` ×${m.repeat}` : ''} · {m.steps.length} {m.steps.length === 1 ? 'etapa' : 'etapas'} · ~{macroMs(m)} ms{m.robloxOnly ? ' · só no Roblox' : ''}
           </span>
@@ -234,6 +263,13 @@ function MacroRow({ m, conflicts, helperOn, onEdit, onExport, onDelete }: {
         {m.enabled
           ? <Button size="sm" icon={<PowerOff />} onClick={() => store.setMacroEnabled(m.id, false)}>Desativar</Button>
           : <Button size="sm" variant="primary" icon={<Power />} disabled={!ready} title={ready ? undefined : 'Defina um botão e pelo menos uma etapa'} onClick={() => store.setMacroEnabled(m.id, true)}>Ativar</Button>}
+        <label className="move-select" title="Mover para categoria">
+          <span className="sr-only">Mover {m.name} para categoria</span>
+          <select aria-label={`Mover ${m.name} para categoria`} value={m.categoryId ?? ''} onChange={(e) => store.setMacroCategory(m.id, e.target.value || null)}>
+            <option value="">Sem categoria</option>
+            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </label>
         <Button size="sm" icon={<Pencil />} onClick={onEdit}>Editar</Button>
         <Button size="sm" variant="ghost" icon={<Play />} disabled={!helperOn || !m.steps.length} onClick={() => void store.testMacro(m)} title="Roda uma vez em 3 segundos">Testar</Button>
         <Button size="sm" variant="ghost" icon={<Copy />} onClick={() => store.duplicateMacro(m.id)} aria-label={`Duplicar ${m.name}`} title="Duplicar" />

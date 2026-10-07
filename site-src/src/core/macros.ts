@@ -13,8 +13,8 @@ export type MacroMode = 'once' | 'loop' | 'hold';
 export interface Macro {
   id: string;
   name: string;
-  /** Rótulo opcional (os modelos usam "Bug Indi" / "GK"). */
-  group?: string;
+  /** Categoria (pasta) a que pertence, ou null = sem categoria. Referencia Category.id. */
+  categoryId: string | null;
   enabled: boolean;
   trigger: string | null;
   mode: MacroMode;
@@ -27,8 +27,12 @@ export interface Macro {
   updatedAt: number;
 }
 
+/** Categoria = pasta de ações, totalmente controlada pelo usuário (criar/renomear/excluir). */
+export interface Category { id: string; name: string }
+
 export interface MacrosState {
-  v: 3;
+  v: 4;
+  categories: Category[];
   macros: Macro[];
   stopKey: string;
 }
@@ -113,17 +117,23 @@ export const TEMPLATES: Template[] = [
 ];
 
 /** Macro a partir de um modelo — SEMPRE desativada. */
-export function fromTemplate(t: Template, id = t.id, now = Date.now()): Macro {
+export function fromTemplate(t: Template, categoryId: string | null = null, id = t.id, now = Date.now()): Macro {
   const p = t.pack;
   return {
-    id, name: p.name, group: t.group, enabled: false, trigger: p.trigger, mode: p.mode, repeat: p.repeat,
+    id, name: p.name, categoryId, enabled: false, trigger: p.trigger, mode: p.mode, repeat: p.repeat,
     loopDelay: p.loopDelay, speed: p.speed, robloxOnly: p.robloxOnly, steps: structuredClone(p.steps), createdAt: now, updatedAt: now,
   };
 }
 
-/** Primeira abertura: os cinco modelos configurados e TODOS desativados. */
+/** Primeira abertura: os cinco modelos, em categorias (Bug Indi, GK), todos desativados. */
 export function defaultMacrosState(): MacrosState {
-  return { v: 3, macros: TEMPLATES.map((t) => fromTemplate(t)), stopKey: 'F8' };
+  const categories: Category[] = [];
+  const idByName = new Map<string, string>();
+  for (const t of TEMPLATES) {
+    if (!idByName.has(t.group)) { const id = newCategoryId(); idByName.set(t.group, id); categories.push({ id, name: t.group }); }
+  }
+  const macros = TEMPLATES.map((t) => fromTemplate(t, idByName.get(t.group)!));
+  return { v: 4, categories, macros, stopKey: 'F8' };
 }
 
 // ───────── ids / validação ─────────
@@ -134,6 +144,18 @@ export function newMacroId(): string {
   } catch {
     return 'm-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   }
+}
+
+export function newCategoryId(): string {
+  try {
+    return 'c-' + crypto.randomUUID().slice(0, 13);
+  } catch {
+    return 'c-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+}
+
+export function sanitizeCategoryName(name: unknown): string {
+  return String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
 }
 
 export function isValidTrigger(code: unknown): code is string {
@@ -214,7 +236,7 @@ export function sanitizeMacro(m: unknown, opts: { forceDisabled?: boolean; keepI
   return {
     id: opts.keepId !== false && typeof i.id === 'string' && i.id ? i.id.slice(0, 80) : newMacroId(),
     name: (typeof i.name === 'string' && i.name.trim() ? i.name.trim() : 'Ação').slice(0, 80),
-    group: typeof i.group === 'string' && i.group ? i.group.slice(0, 40) : typeof i.category === 'string' && i.category ? i.category.slice(0, 40) : undefined,
+    categoryId: typeof i.categoryId === 'string' && i.categoryId ? i.categoryId.slice(0, 80) : null,
     enabled: opts.forceDisabled ? false : i.enabled === true,
     trigger: isValidTrigger(i.trigger) ? i.trigger : null,
     mode: (['once', 'loop', 'hold'] as const).includes(i.mode as MacroMode) ? (i.mode as MacroMode) : 'once',
@@ -245,25 +267,59 @@ export function canActivate(m: Macro) {
 
 const isAhk = (o: Record<string, unknown>) => /ahk/i.test(String(o.category ?? '')) || /\(AHK\)/i.test(String(o.name ?? ''));
 
+/** Garante que exista uma categoria com este nome; devolve o id (cria se faltar). */
+function ensureCategory(cats: Category[], name: string): string {
+  const clean = sanitizeCategoryName(name);
+  if (!clean) return '';
+  const found = cats.find((c) => c.name.toLowerCase() === clean.toLowerCase());
+  if (found) return found.id;
+  const id = newCategoryId();
+  cats.push({ id, name: clean });
+  return id;
+}
+
 /**
  * Restaura o estado salvo no navegador.
- *  - v3 (atual): mantém o que o usuário escolheu.
- *  - v2 (versão anterior do site, que ativava ações sozinho): mantém botões e
- *    passos, mas tudo volta DESATIVADO.
- *  - v1 (site antigo, `gerenciador:macros:v1`): importa as macros do usuário
- *    (sem o AHK Flick), todas desativadas.
+ *  - v4 (atual): categorias como entidades + ações com categoryId.
+ *  - v3 (anterior): ações tinham a categoria como texto (`group`); viram categorias.
+ *  - v2 (site que ativava sozinho): mantém botões, tudo DESATIVADO.
+ *  - v1 (site antigo): importa as macros do usuário (sem AHK Flick), desativadas.
  */
-export function restoreMacrosState(v3: unknown, v2?: unknown, v1?: unknown): MacrosState {
-  if (v3 && typeof v3 === 'object' && (v3 as MacrosState).v === 3) {
-    const s = v3 as MacrosState;
+export function restoreMacrosState(v4: unknown, v2?: unknown, v1?: unknown): MacrosState {
+  if (v4 && typeof v4 === 'object' && (v4 as MacrosState).v === 4) {
+    const s = v4 as MacrosState;
+    const categories = (Array.isArray(s.categories) ? s.categories : [])
+      .map((c) => (c && typeof c === 'object' && typeof (c as Category).id === 'string' ? { id: (c as Category).id.slice(0, 80), name: sanitizeCategoryName((c as Category).name) } : null))
+      .filter((c): c is Category => !!c && !!c.name);
+    const valid = new Set(categories.map((c) => c.id));
     const seen = new Set<string>();
     const macros = (Array.isArray(s.macros) ? s.macros : []).map((m) => sanitizeMacro(m)).filter((m): m is Macro => {
       if (!m || seen.has(m.id)) return false;
       seen.add(m.id);
       return true;
     });
-    for (const m of macros) if (m.enabled && !canActivate(m)) m.enabled = false;
-    return { v: 3, macros, stopKey: isValidTrigger(s.stopKey) ? s.stopKey : 'F8' };
+    for (const m of macros) {
+      if (m.categoryId && !valid.has(m.categoryId)) m.categoryId = null; // categoria sumiu → sem categoria
+      if (m.enabled && !canActivate(m)) m.enabled = false;
+    }
+    return { v: 4, categories, macros, stopKey: isValidTrigger(s.stopKey) ? s.stopKey : 'F8' };
+  }
+  // v3: ações com `group` (texto) → vira categorias-entidade, na ordem de aparição.
+  if (v4 && typeof v4 === 'object' && (v4 as { v?: number }).v === 3) {
+    const s = v4 as { macros?: unknown[]; stopKey?: unknown };
+    const categories: Category[] = [];
+    const seen = new Set<string>();
+    const macros: Macro[] = [];
+    for (const raw of Array.isArray(s.macros) ? s.macros : []) {
+      const m = sanitizeMacro(raw);
+      if (!m || seen.has(m.id)) continue;
+      seen.add(m.id);
+      const g = raw && typeof raw === 'object' ? (raw as Record<string, unknown>).group : undefined;
+      m.categoryId = typeof g === 'string' && g.trim() ? ensureCategory(categories, g) : null;
+      if (m.enabled && !canActivate(m)) m.enabled = false;
+      macros.push(m);
+    }
+    return { v: 4, categories, macros, stopKey: isValidTrigger(s.stopKey) ? s.stopKey : 'F8' };
   }
   if (v2 && typeof v2 === 'object' && (v2 as { v?: number }).v === 2) {
     const s = v2 as { actions?: Array<{ id?: string; group?: string; trigger?: unknown; macro?: Record<string, unknown> }>; stopKey?: unknown };
@@ -278,14 +334,14 @@ export function restoreMacrosState(v3: unknown, v2?: unknown, v1?: unknown): Mac
   }
   if (v1 && typeof v1 === 'object' && Array.isArray((v1 as { macros?: unknown }).macros)) {
     const base = defaultMacrosState();
-    const old = ((v1 as { macros: unknown[] }).macros)
-      .filter((m) => m && typeof m === 'object' && !isAhk(m as Record<string, unknown>))
-      .map((m) => sanitizeMacro(m, { forceDisabled: true }))
-      .filter((m): m is Macro => !!m);
     const templateNames = new Set(base.macros.map((m) => m.name.toLowerCase()));
-    for (const m of old) {
-      if (templateNames.has(m.name.toLowerCase())) continue; // o modelo já existe
+    for (const raw of (v1 as { macros: unknown[] }).macros) {
+      if (!raw || typeof raw !== 'object' || isAhk(raw as Record<string, unknown>)) continue;
+      const m = sanitizeMacro(raw, { forceDisabled: true });
+      if (!m || templateNames.has(m.name.toLowerCase())) continue; // o modelo já existe
       if (base.macros.some((x) => x.id === m.id)) m.id = newMacroId();
+      const cat = (raw as Record<string, unknown>).category ?? (raw as Record<string, unknown>).group;
+      m.categoryId = typeof cat === 'string' && cat.trim() ? ensureCategory(base.categories, cat) : null;
       base.macros.push(m);
     }
     const sk = (v1 as { settings?: { stopKey?: unknown } }).settings?.stopKey;
@@ -306,44 +362,89 @@ export function setAllEnabled(st: MacrosState, enabled: boolean): MacrosState {
   return { ...st, macros: st.macros.map((m) => ({ ...m, enabled: enabled && canActivate(m) })) };
 }
 
-// ───────── categorias (o campo `group` de cada ação) ─────────
+// ───────── categorias (pastas = entidades) ─────────
 
-export const UNCATEGORIZED_KEY = '\u0000'; // chave interna do grupo "Sem categoria"
+/** categoryId efetivo (null se a categoria não existe mais). */
+function effCat(st: MacrosState, m: Macro): string | null {
+  return m.categoryId && st.categories.some((c) => c.id === m.categoryId) ? m.categoryId : null;
+}
 
-export interface MacroGroup { key: string; name: string | null; macros: Macro[] }
+export interface MacroGroup { category: Category | null; macros: Macro[] }
 
-const groupName = (m: Macro) => (m.group && m.group.trim() ? m.group.trim() : null);
-
-/** Agrupa as ações por categoria, preservando a ordem de aparição. */
-export function groupMacros(macros: Macro[]): MacroGroup[] {
-  const order: string[] = [];
+/**
+ * Agrupa em pastas: cada categoria na sua ordem (inclusive vazias), e por fim o
+ * grupo "Sem categoria". Dentro de cada pasta, a ordem é a do array de ações.
+ */
+export function groupMacros(st: MacrosState): MacroGroup[] {
   const by = new Map<string, Macro[]>();
-  for (const m of macros) {
-    const name = groupName(m);
-    const key = name ?? UNCATEGORIZED_KEY;
-    if (!by.has(key)) { by.set(key, []); order.push(key); }
-    by.get(key)!.push(m);
+  const uncat: Macro[] = [];
+  for (const m of st.macros) {
+    const cid = effCat(st, m);
+    if (cid) { if (!by.has(cid)) by.set(cid, []); by.get(cid)!.push(m); }
+    else uncat.push(m);
   }
-  return order.map((key) => ({ key, name: key === UNCATEGORIZED_KEY ? null : key, macros: by.get(key)! }));
+  const groups: MacroGroup[] = st.categories.map((c) => ({ category: c, macros: by.get(c.id) ?? [] }));
+  groups.push({ category: null, macros: uncat });
+  return groups;
 }
 
-/** Nomes de categoria existentes (para sugerir no editor), em ordem alfabética. */
-export function categoryNames(macros: Macro[]): string[] {
-  const set = new Set<string>();
-  for (const m of macros) { const n = groupName(m); if (n) set.add(n); }
-  return [...set].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+/** Cria uma categoria nova (nome único). Devolve o estado e o id criado. */
+export function addCategory(st: MacrosState, name: string): { state: MacrosState; id: string } {
+  const clean = sanitizeCategoryName(name) || 'Nova categoria';
+  const unique = uniqueCategoryName(st.categories, clean);
+  const id = newCategoryId();
+  return { state: { ...st, categories: [...st.categories, { id, name: unique }] }, id };
 }
 
-/** Ativa/desativa todas as ações de uma categoria (null = "Sem categoria"). */
-export function setCategoryEnabled(st: MacrosState, category: string | null, enabled: boolean): MacrosState {
-  return { ...st, macros: st.macros.map((m) => (groupName(m) === category ? { ...m, enabled: enabled && canActivate(m) } : m)) };
+function uniqueCategoryName(cats: Category[], name: string, ignoreId?: string): string {
+  const taken = new Set(cats.filter((c) => c.id !== ignoreId).map((c) => c.name.toLowerCase()));
+  if (!taken.has(name.toLowerCase())) return name;
+  for (let n = 2; ; n++) { const cand = `${name} (${n})`.slice(0, 40); if (!taken.has(cand.toLowerCase())) return cand; }
 }
 
-/** Renomeia uma categoria (muda o `group` de todas as ações dela). Vazio = sem categoria. */
-export function renameCategory(st: MacrosState, from: string, to: string): MacrosState {
-  const t = to.trim().slice(0, 40);
-  const now = Date.now();
-  return { ...st, macros: st.macros.map((m) => (groupName(m) === from ? { ...m, group: t || undefined, updatedAt: now } : m)) };
+export function renameCategory(st: MacrosState, id: string, name: string): MacrosState {
+  const clean = sanitizeCategoryName(name);
+  if (!clean) return st;
+  const unique = uniqueCategoryName(st.categories, clean, id);
+  return { ...st, categories: st.categories.map((c) => (c.id === id ? { ...c, name: unique } : c)) };
+}
+
+/** Exclui a categoria: as ações dentro dela voltam a ficar SEM categoria (não são apagadas). */
+export function removeCategory(st: MacrosState, id: string): MacrosState {
+  return {
+    ...st,
+    categories: st.categories.filter((c) => c.id !== id),
+    macros: st.macros.map((m) => (m.categoryId === id ? { ...m, categoryId: null } : m)),
+  };
+}
+
+/** Reordena a própria categoria (move a pasta para cima/baixo). */
+export function moveCategory(st: MacrosState, id: string, dir: -1 | 1): MacrosState {
+  const i = st.categories.findIndex((c) => c.id === id);
+  if (i < 0) return st;
+  return { ...st, categories: moveItem(st.categories, i, i + dir) };
+}
+
+/** Move uma ação para outra categoria (null = sem categoria). */
+export function setMacroCategory(st: MacrosState, macroId: string, categoryId: string | null): MacrosState {
+  const cid = categoryId && st.categories.some((c) => c.id === categoryId) ? categoryId : null;
+  return { ...st, macros: st.macros.map((m) => (m.id === macroId ? { ...m, categoryId: cid, updatedAt: Date.now() } : m)) };
+}
+
+/** Reordena uma ação dentro da própria categoria (troca com o vizinho do mesmo grupo). */
+export function reorderMacro(st: MacrosState, macroId: string, dir: -1 | 1): MacrosState {
+  const idx = st.macros.findIndex((m) => m.id === macroId);
+  if (idx < 0) return st;
+  const cid = effCat(st, st.macros[idx]);
+  for (let j = idx + dir; j >= 0 && j < st.macros.length; j += dir) {
+    if (effCat(st, st.macros[j]) === cid) return { ...st, macros: moveItem(st.macros, idx, j) };
+  }
+  return st;
+}
+
+/** Ativa/desativa todas as ações de uma categoria (null = sem categoria). */
+export function setCategoryEnabled(st: MacrosState, categoryId: string | null, enabled: boolean): MacrosState {
+  return { ...st, macros: st.macros.map((m) => (effCat(st, m) === categoryId ? { ...m, enabled: enabled && canActivate(m) } : m)) };
 }
 
 export function upsertMacro(st: MacrosState, m: Macro): MacrosState {
@@ -391,24 +492,41 @@ export function toHelperMacro(m: Macro) {
 
 // ───────── importação / exportação ─────────
 
-export function toExport(m: Macro) {
+export function toExport(m: Macro, categoryName?: string | null) {
   return {
-    bope: 'macro', v: 1, name: m.name, ...(m.group ? { group: m.group } : {}), mode: m.mode, repeat: m.repeat, loopDelay: m.loopDelay,
+    bope: 'macro', v: 1, name: m.name, ...(categoryName ? { category: categoryName } : {}), mode: m.mode, repeat: m.repeat, loopDelay: m.loopDelay,
     speed: m.speed, robloxOnly: m.robloxOnly, steps: m.steps, ...(m.trigger ? { trigger: m.trigger } : {}),
   };
 }
 
+const catNameById = (st: MacrosState, id: string | null) => (id ? st.categories.find((c) => c.id === id)?.name ?? null : null);
+
 /**
- * Exporta um pacote. A categoria de cada ação (`group`) vai junto, então importar
- * recria as categorias. `category` no topo é só informativo (o que vale é o group
- * de cada ação); fica preenchido quando o pacote é de uma única categoria.
+ * Exporta TUDO preservando a estrutura: a lista de categorias (inclusive vazias,
+ * na ordem) e cada ação com o nome da categoria dela. Importar reconstrói as pastas.
  */
-export function exportPack(macros: Macro[]): string {
-  const cats = [...new Set(macros.map((m) => m.group).filter(Boolean))];
-  const pack: Record<string, unknown> = { bope: 'macro-pack', v: 1 };
-  if (cats.length === 1) pack.category = cats[0];
-  pack.macros = macros.map(toExport);
-  return JSON.stringify(pack, null, 2);
+export function exportAll(st: MacrosState): string {
+  return JSON.stringify({
+    bope: 'macro-pack', v: 2,
+    categories: st.categories.map((c) => ({ name: c.name })),
+    macros: st.macros.map((m) => toExport(m, catNameById(st, effCat(st, m)))),
+  }, null, 2);
+}
+
+/** Exporta uma categoria (ou o grupo "Sem categoria", com categoryId null) com suas ações. */
+export function exportCategory(st: MacrosState, categoryId: string | null): string {
+  const cat = categoryId ? st.categories.find((c) => c.id === categoryId) ?? null : null;
+  const macros = st.macros.filter((m) => effCat(st, m) === (cat ? cat.id : null));
+  return JSON.stringify({
+    bope: 'macro-pack', v: 2,
+    categories: cat ? [{ name: cat.name }] : [],
+    macros: macros.map((m) => toExport(m, cat ? cat.name : null)),
+  }, null, 2);
+}
+
+/** Exporta uma única ação (sem categoria, para compartilhar só a macro). */
+export function exportMacro(m: Macro): string {
+  return JSON.stringify({ bope: 'macro-pack', v: 2, categories: [], macros: [toExport(m, null)] }, null, 2);
 }
 
 const CODE_PREFIXES = { plain: ['BOPE-SEQ1:', 'BOPE-MACRO1:'], deflate: ['BOPE-SEQ1Z:', 'BOPE-MACRO1Z:'] };
@@ -436,23 +554,98 @@ export async function decodeShare(text: string): Promise<unknown> {
   return JSON.parse(p ? new TextDecoder().decode(unB64(compact.slice(p.length))) : t);
 }
 
-/** Macros importadas entram SEMPRE desativadas e com ids novos. */
-export async function parseMacroImport(text: string): Promise<Macro[]> {
+/** Uma ação importada, com o nome da categoria a que pertencia (string ou null). */
+export interface ImportedItem { macro: Macro; categoryName: string | null }
+/** Pacote importado: categorias (nomes, inclusive vazias, na ordem) + ações. */
+export interface ImportedPack { categories: string[]; items: ImportedItem[] }
+
+const catNameOf = (o: Record<string, unknown>): string | null => {
+  const raw = o.category ?? o.group;
+  return typeof raw === 'string' && raw.trim() ? sanitizeCategoryName(raw) : null;
+};
+
+/**
+ * Lê um JSON/código e devolve a estrutura (categorias + ações). As ações entram
+ * SEMPRE desativadas e com ids novos; as categorias preservam nome e ordem.
+ */
+export async function parseMacroImport(text: string): Promise<ImportedPack> {
   let data: unknown;
   try {
     data = await decodeShare(text);
   } catch (e) {
     throw new Error(`Não foi possível ler: ${(e as Error).message}`);
   }
+  const obj = data && typeof data === 'object' && !Array.isArray(data) ? data as Record<string, unknown> : null;
   const list = Array.isArray(data) ? data
-    : data && typeof data === 'object' && Array.isArray((data as { macros?: unknown }).macros) ? (data as { macros: unknown[] }).macros
+    : obj && Array.isArray(obj.macros) ? obj.macros
       : [data];
-  const macros = list
-    .filter((m) => m && typeof m === 'object' && !isAhk(m as Record<string, unknown>))
-    .map((m) => sanitizeMacro(m, { forceDisabled: true, keepId: false }))
-    .filter((m): m is Macro => !!m && m.steps.length > 0);
-  if (!macros.length) throw new Error('Nenhuma ação válida encontrada.');
-  return macros;
+
+  // Categorias declaradas no topo (preserva vazias e ordem).
+  const order: string[] = [];
+  const seenCat = new Set<string>();
+  const addCat = (name: string | null) => {
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (!seenCat.has(key)) { seenCat.add(key); order.push(name); }
+  };
+  if (obj && Array.isArray(obj.categories)) {
+    for (const c of obj.categories) {
+      const name = typeof c === 'string' ? sanitizeCategoryName(c) : c && typeof c === 'object' ? sanitizeCategoryName((c as { name?: unknown }).name) : '';
+      if (name) addCat(name);
+    }
+  }
+
+  const items: ImportedItem[] = [];
+  for (const raw of list) {
+    if (!raw || typeof raw !== 'object' || isAhk(raw as Record<string, unknown>)) continue;
+    const macro = sanitizeMacro(raw, { forceDisabled: true, keepId: false });
+    if (!macro || macro.steps.length === 0) continue;
+    const categoryName = catNameOf(raw as Record<string, unknown>);
+    macro.categoryId = null; // o id real é atribuído na hora de importar
+    addCat(categoryName);
+    items.push({ macro, categoryName });
+  }
+  if (!items.length && !order.length) throw new Error('Nenhuma ação válida encontrada.');
+  return { categories: order, items };
+}
+
+/** Nomes de categoria do pacote que já existem no estado (para avisar o usuário). */
+export function importCollisions(st: MacrosState, pack: ImportedPack): string[] {
+  const existing = new Set(st.categories.map((c) => c.name.toLowerCase()));
+  return pack.categories.filter((n) => existing.has(n.toLowerCase()));
+}
+
+/**
+ * Aplica um pacote importado, SEM apagar nada do que já existe.
+ *  - 'merge': categorias com o mesmo nome recebem as ações importadas.
+ *  - 'new':  cria categorias novas (renomeadas se o nome colidir).
+ * As ações entram desativadas e com ids novos; nenhuma ação existente é sobrescrita.
+ */
+export function applyImport(st: MacrosState, pack: ImportedPack, mode: 'merge' | 'new'): { state: MacrosState; addedCategories: number; addedMacros: number } {
+  const categories = [...st.categories];
+  const byName = new Map(categories.map((c) => [c.name.toLowerCase(), c.id]));
+  const target = new Map<string, string>(); // nome importado (lower) → id de destino
+  for (const name of pack.categories) {
+    const lower = name.toLowerCase();
+    if (mode === 'merge' && byName.has(lower)) { target.set(lower, byName.get(lower)!); continue; }
+    const unique = uniqueCategoryName(categories, name);
+    const id = newCategoryId();
+    categories.push({ id, name: unique });
+    byName.set(unique.toLowerCase(), id);
+    target.set(lower, id);
+  }
+  const macros = [...st.macros];
+  const ids = new Set(macros.map((m) => m.id));
+  let added = 0;
+  for (const it of pack.items) {
+    const cid = it.categoryName ? target.get(it.categoryName.toLowerCase()) ?? null : null;
+    let m: Macro = { ...it.macro, categoryId: cid, enabled: false };
+    if (ids.has(m.id)) m = { ...m, id: newMacroId() };
+    ids.add(m.id);
+    macros.push(m);
+    added++;
+  }
+  return { state: { ...st, categories, macros }, addedCategories: categories.length - st.categories.length, addedMacros: added };
 }
 
 // ───────── textos para a interface ─────────
