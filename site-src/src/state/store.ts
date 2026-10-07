@@ -7,7 +7,7 @@ import {
   fromTemplate, moveCategory, newMacroId, removeCategory, removeMacro, renameCategory, reorderMacro, restoreMacrosState,
   setAllEnabled, setCategoryEnabled, setMacroCategory, setEnabled, toHelperMacro, upsertMacro,
 } from '../core/macros';
-import { type FlagValue, toHelperValue } from '../core/flags';
+import { type FlagValue, cleanFlagName, toHelperValue } from '../core/flags';
 import { HelperClient, type HelperResult, type HelperStatus } from '../core/helper/client';
 import { buildIndex, type DatasetIndex } from '../core/offsets/dataset';
 import { OffsetService, type OffsetState } from '../core/offsets/service';
@@ -371,8 +371,10 @@ export class AppStore {
 
   setHotkey(name: string, hk: FlagHotkey | null) {
     const hotkeys = { ...this.state.hotkeys };
+    // Some com registros antigos da mesma flag salvos com/sem prefixo (DFIntX / X).
+    const key = cleanFlagName(name);
+    for (const k of Object.keys(hotkeys)) if (cleanFlagName(k) === key) delete hotkeys[k];
     if (hk && (hk.toggleKey || hk.cycleKey)) hotkeys[name] = hk;
-    else delete hotkeys[name];
     this.set({ hotkeys });
     writeJson(KEYS.hotkeys, hotkeys);
     this.queue(() => this.pushHotkeys());

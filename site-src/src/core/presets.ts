@@ -1,6 +1,6 @@
 // Presets de flags e limpeza de flags que não existem mais no dump atual.
 
-import { FLAG_NAME_RX, type FlagValue } from './flags';
+import { FLAG_NAME_RX, cleanFlagName, type FlagValue } from './flags';
 import { type DatasetIndex, flagExists } from './offsets/dataset';
 
 export interface Preset {
@@ -166,6 +166,9 @@ export function removeInvalidFlags(presets: Preset[], hotkeys: HotkeyMap, report
 export function sanitizeHotkeys(raw: unknown): HotkeyMap {
   const out: HotkeyMap = {};
   if (!raw || typeof raw !== 'object') return out;
+  // Nomes com e sem prefixo (DFIntX / X) são a MESMA flag: junta num registro só,
+  // preferindo o nome com prefixo; campos que faltam vêm do outro registro.
+  const byClean = new Map<string, string>();
   for (const [name, v] of Object.entries(raw as Record<string, unknown>)) {
     if (!FLAG_NAME_RX.test(name) || !v || typeof v !== 'object') continue;
     const o = v as Record<string, unknown>;
@@ -173,7 +176,30 @@ export function sanitizeHotkeys(raw: unknown): HotkeyMap {
     if (typeof o.toggleKey === 'string' && o.toggleKey) hk.toggleKey = o.toggleKey.slice(0, 40);
     if (typeof o.cycleKey === 'string' && o.cycleKey) hk.cycleKey = o.cycleKey.slice(0, 40);
     if (Array.isArray(o.cycleValues)) hk.cycleValues = o.cycleValues.map(String).slice(0, 20);
-    if (hk.toggleKey || hk.cycleKey) out[name] = hk;
+    if (!hk.toggleKey && !hk.cycleKey) continue;
+    const key = cleanFlagName(name);
+    const prev = byClean.get(key);
+    if (!prev) { byClean.set(key, name); out[name] = hk; continue; }
+    const prefixed = name !== key;
+    const [winName, win, lose] = prefixed && prev === key ? [name, hk, out[prev]] : [prev, out[prev], hk];
+    const merged: FlagHotkey = { ...win };
+    if (!merged.toggleKey && lose.toggleKey) merged.toggleKey = lose.toggleKey;
+    if (!merged.cycleKey && lose.cycleKey) { merged.cycleKey = lose.cycleKey; merged.cycleValues = lose.cycleValues; }
+    delete out[prev];
+    out[winName] = merged;
+    byClean.set(key, winName);
+  }
+  // Toggle e cycle no mesmo botão se anulam (o cycle muda e o toggle desliga): fica o toggle.
+  for (const hk of Object.values(out)) {
+    if (hk.toggleKey && hk.toggleKey === hk.cycleKey) { delete hk.cycleKey; delete hk.cycleValues; }
   }
   return out;
+}
+
+/** Atalho de uma flag, aceitando o registro salvo com ou sem prefixo. */
+export function findHotkey(hotkeys: HotkeyMap, name: string): FlagHotkey | undefined {
+  if (hotkeys[name]) return hotkeys[name];
+  const key = cleanFlagName(name);
+  const alt = Object.keys(hotkeys).find((k) => cleanFlagName(k) === key);
+  return alt ? hotkeys[alt] : undefined;
 }

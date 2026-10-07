@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { triggerLabel } from '../core/macros';
 import { type FlagType, type FlagValue, coerceValue, flagType } from '../core/flags';
 import { flagExists } from '../core/offsets/dataset';
-import { type Preset, exportPreset, parseImport, scanInvalidFlags } from '../core/presets';
+import { type Preset, exportPreset, findHotkey, parseImport, scanInvalidFlags } from '../core/presets';
 import { compatStatus } from '../state/status';
 import { type BuiltinGroup, hasFlag, store, useApp } from '../state/store';
 import {
@@ -178,7 +178,7 @@ function PresetEditor({ preset, onDialog }: { preset: Preset; onDialog: (d: Dial
                   name={name}
                   value={preset.flags[name]}
                   valid={index ? flagExists(index, name) : null}
-                  hotkey={hotkeys[name]?.toggleKey ?? hotkeys[name]?.cycleKey ?? null}
+                  hotkey={findHotkey(hotkeys, name)?.toggleKey ?? findHotkey(hotkeys, name)?.cycleKey ?? null}
                   onHotkey={() => onDialog({ kind: 'hotkey', flag: name })}
                 />
               ))}
@@ -390,11 +390,12 @@ function ExportDialog({ preset, onClose }: { preset: Preset; onClose: () => void
 }
 
 function HotkeyDialog({ flag, preset, onClose }: { flag: string; preset: Preset; onClose: () => void }) {
-  const current = useApp((s) => s.hotkeys[flag]);
+  const current = useApp((s) => findHotkey(s.hotkeys, flag));
   const [toggleKey, setToggleKey] = useState<string | null>(current?.toggleKey ?? null);
   const [cycleKey, setCycleKey] = useState<string | null>(current?.cycleKey ?? null);
   const [cycleValues, setCycleValues] = useState((current?.cycleValues ?? []).join(', '));
   const values = cycleValues.split(',').map((v) => v.trim()).filter(Boolean);
+  const sameKey = !!toggleKey && toggleKey === cycleKey;
   const save = () => {
     store.setHotkey(flag, toggleKey || cycleKey ? { toggleKey: toggleKey ?? undefined, cycleKey: cycleKey ?? undefined, cycleValues: cycleKey ? values : undefined } : null);
     onClose();
@@ -408,7 +409,7 @@ function HotkeyDialog({ flag, preset, onClose }: { flag: string; preset: Preset;
           {current && <Button variant="danger" onClick={() => { store.setHotkey(flag, null); onClose(); }}>Remover atalho</Button>}
           <div style={{ flex: 1 }} />
           <Button onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" disabled={!!cycleKey && values.length < 2} onClick={save}>Salvar</Button>
+          <Button variant="primary" disabled={sameKey || (!!cycleKey && values.length < 2)} onClick={save}>Salvar</Button>
         </>
       )}
     >
@@ -435,6 +436,7 @@ function HotkeyDialog({ flag, preset, onClose }: { flag: string; preset: Preset;
           <input className="input mono" value={cycleValues} onChange={(e) => setCycleValues(e.target.value)} placeholder="60, 144, 240" />
         </label>
       )}
+      {sameKey && <p role="alert" style={{ margin: 0, fontSize: 13, color: 'var(--danger, #e5484d)' }}>Use botões diferentes para ligar/desligar e alternar valores — no mesmo botão um desfaz o outro.</p>}
       {(toggleKey || cycleKey) && <div className="row faint" style={{ fontSize: 12.5 }}>Atual: {toggleKey && <KeyBadge code={toggleKey} />} {cycleKey && <KeyBadge code={cycleKey} />}</div>}
     </Modal>
   );

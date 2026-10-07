@@ -7,7 +7,7 @@ import {
 } from '../../src/core/macros';
 import { buildIndex, parseSiteDataset } from '../../src/core/offsets/dataset';
 import {
-  normalizePreset, parseImport, removeInvalidFlags, sanitizeHotkeys, scanInvalidFlags, type Preset,
+  normalizePreset, parseImport, removeInvalidFlags, sanitizeHotkeys, findHotkey, scanInvalidFlags, type Preset,
 } from '../../src/core/presets';
 import { V_NEW, siteDatasetJson } from './helpers';
 
@@ -257,5 +257,21 @@ describe('presets e flags inválidas', () => {
 
   it('hotkeys salvas são sanitizadas', () => {
     expect(sanitizeHotkeys({ FFlagA: { toggleKey: 'F1', junk: 1 }, 'x y': { toggleKey: 'F2' }, FFlagB: {} })).toEqual({ FFlagA: { toggleKey: 'F1' } });
+  });
+
+  it('hotkeys da mesma flag com e sem prefixo viram um registro só', () => {
+    const out = sanitizeHotkeys({
+      SimX: { cycleKey: 'MouseMiddle', cycleValues: ['60', '30'] },
+      DFIntSimX: { toggleKey: 'MouseMiddle' },
+      FFlagY: { toggleKey: 'F1' },
+      Y: { cycleKey: 'F2', cycleValues: ['1', '2'] },
+    });
+    // mesmo botão nos dois: fica só o toggle, no nome com prefixo
+    expect(out).toEqual({
+      DFIntSimX: { toggleKey: 'MouseMiddle' },
+      FFlagY: { toggleKey: 'F1', cycleKey: 'F2', cycleValues: ['1', '2'] },
+    });
+    expect(findHotkey(out, 'SimX')).toEqual({ toggleKey: 'MouseMiddle' });
+    expect(findHotkey(out, 'FFlagY')?.cycleKey).toBe('F2');
   });
 });
