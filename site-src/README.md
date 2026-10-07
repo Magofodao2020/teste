@@ -101,6 +101,9 @@ Nenhuma ação começa ativa. Os tipos de etapa são exatamente os que o Helper 
 A gravação usa as rotas do Helper `/macro/record/*` (hook global do Windows).
 
 Gatilhos aceitam teclas, botões do mouse (esquerdo, direito, meio, laterais) e scroll.
+Com o Helper aberto, "Definir botão" também pede o botão ao Helper (`/capture/*`, hook
+do Windows) e vale o que chegar primeiro: assim funciona igual em qualquer navegador e
+mouse, mesmo quando o navegador não recebe os laterais. Sem o Helper, vale só o navegador.
 `src/ui/sideGuard.ts` impede que os botões laterais façam o navegador voltar/avançar
 (cancela o `mouseup` e mantém uma entrada-guarda no histórico); se o navegador só gerar
 o "voltar" sem evento de mouse, a captura registra `MouseBack`. Mouses com software que

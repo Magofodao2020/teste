@@ -392,6 +392,61 @@ describe('ações e macros', () => {
     await ctx.close();
   });
 
+  it('definir botão pelo Helper (hook do Windows): lateral que o navegador não recebe, teclas, Esc e filtros', async () => {
+    const { page, ctx, errors } = await open({ [LIVE_URL]: { body: V_SITE } });
+    await page.goto(`${SITE}#/acoes`);
+    await waitFor(() => helper.state.macros); // site conectado ao Helper
+    const cap = row(page, 'Perfect Dive').getByRole('button', { name: 'Botão de Perfect Dive' });
+    const triggerOf = () => helper.state.macros?.find((m) => m.id === 'perfect-dive')?.trigger;
+
+    // Lateral ► : nenhum evento chega ao navegador, só o Helper vê.
+    await cap.click();
+    await waitFor(() => helper.state.capture.active);
+    assert.deepEqual(helper.state.capture.opts, { mouse: true, scroll: true, keyboard: true });
+    helper.press('MouseForward');
+    await waitFor(async () => (await cap.textContent()).includes('Lateral ► (avançar)'));
+    await waitFor(() => triggerOf() === 'MouseForward');
+
+    // Lateral ◄
+    await cap.click();
+    await waitFor(() => helper.state.capture.active);
+    helper.press('MouseBack');
+    await waitFor(() => triggerOf() === 'MouseBack');
+
+    // Tecla vinda do Helper
+    await cap.click();
+    await waitFor(() => helper.state.capture.active);
+    helper.press('KeyG');
+    await waitFor(() => triggerOf() === 'KeyG');
+
+    // Esc pelo Helper cancela (não muda o botão)
+    await cap.click();
+    await waitFor(() => helper.state.capture.active);
+    helper.press('Escape');
+    await waitFor(async () => !(await cap.textContent()).includes('Pressione'));
+    assert.equal(triggerOf(), 'KeyG');
+
+    // Navegador responde primeiro: a captura do Helper é encerrada
+    await cap.click();
+    await waitFor(() => helper.state.capture.active);
+    await page.waitForTimeout(200);
+    await page.keyboard.press('KeyJ');
+    await waitFor(() => triggerOf() === 'KeyJ');
+    await waitFor(() => !helper.state.capture.active);
+
+    // Tecla da etapa (só teclado): o Helper não aceita mouse nem scroll
+    await page.getByRole('button', { name: 'Criar ação' }).click();
+    await page.getByLabel('Tipo da nova etapa').selectOption('key');
+    await page.getByRole('button', { name: 'Adicionar etapa' }).click();
+    await page.getByRole('button', { name: 'Tecla da etapa' }).click();
+    await waitFor(() => helper.state.capture.active);
+    assert.deepEqual(helper.state.capture.opts, { mouse: false, scroll: false, keyboard: true });
+    helper.press('KeyQ');
+    await waitFor(async () => (await page.getByRole('button', { name: 'Tecla da etapa' }).textContent()).includes('Q'));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
   it('Helper reiniciado recebe offsets, ações e atalhos de novo', async () => {
     const { ctx } = await open({ [LIVE_URL]: { body: V_SITE } });
     await waitFor(() => helper.state.offsets && helper.state.macros);

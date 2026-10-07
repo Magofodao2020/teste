@@ -135,11 +135,37 @@ export function KeyCapture({ value, onChange, allowScroll = true, keyboardOnly =
   useEffect(() => {
     if (!capturing) return;
     let armed = false;
+    let done = false;
     const arm = setTimeout(() => { armed = true; }, 150); // ignora o próprio clique que abriu a captura
     const finish = (code: string | null) => {
+      if (done) return;
+      done = true;
       setCapturing(false);
       if (code) onChangeRef.current(code);
     };
+
+    // Com o Helper aberto, o botão também é lido pelo hook do Windows: funciona igual
+    // em qualquer navegador e mouse (inclusive laterais que o navegador não repassa).
+    // O que chegar primeiro (Helper ou navegador) vale.
+    let helperOn = false;
+    let poll: ReturnType<typeof setTimeout> | null = null;
+    if (store.getState().helper) {
+      void store.helper.captureStart({ mouse: !keyboardOnly, scroll: allowScroll && !keyboardOnly, keyboard: true }).then((r) => {
+        if (!r.ok) return;
+        if (done) { void store.helper.captureStop(); return; }
+        helperOn = true;
+        const id = Number(r.id) || 0;
+        const tick = async () => {
+          if (done) return;
+          const st = await store.helper.captureStatus();
+          if (done) return;
+          if (st && st.id === id && st.code) { helperOn = false; finish(st.code === 'Escape' ? null : st.code); return; }
+          if (st && st.id === id && !st.active) { helperOn = false; return; } // expirou: segue só com o navegador
+          poll = setTimeout(tick, 50);
+        };
+        poll = setTimeout(tick, 50);
+      });
+    }
     const onKey = (e: KeyboardEvent) => {
       e.preventDefault(); e.stopPropagation();
       if (e.code === 'Escape') finish(null);
@@ -164,7 +190,10 @@ export function KeyCapture({ value, onChange, allowScroll = true, keyboardOnly =
     window.addEventListener('wheel', onWheel, { capture: true, passive: false });
     window.addEventListener('contextmenu', block, true);
     return () => {
+      done = true;
       clearTimeout(arm);
+      if (poll) clearTimeout(poll);
+      if (helperOn) void store.helper.captureStop();
       endSide();
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('mousedown', onMouse, true);

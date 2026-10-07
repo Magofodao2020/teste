@@ -136,4 +136,18 @@ export class HelperClient {
     }
   }
   stopMacros() { return this.post('/macro/stop', {}); }
+
+  /** "Definir botão" pelo hook do Windows (qualquer navegador, inclusive laterais). */
+  captureStart(opts: { mouse: boolean; scroll: boolean; keyboard: boolean }) { return this.post('/capture/start', opts, PROBE_TIMEOUT_MS * 2); }
+  captureStop() { return this.post('/capture/stop', {}, PROBE_TIMEOUT_MS * 2); }
+  async captureStatus(): Promise<{ active: boolean; code: string | null; id: number } | null> {
+    if (!this.port) return null;
+    try {
+      const res = await this.request(`http://127.0.0.1:${this.port}/capture/status`, { method: 'GET' }, PROBE_TIMEOUT_MS);
+      const d = (await res.json()) as Record<string, unknown>;
+      return { active: !!d.active, code: typeof d.code === 'string' ? d.code : null, id: Number(d.id) || 0 };
+    } catch {
+      return null;
+    }
+  }
 }

@@ -6,6 +6,7 @@ export function startMockHelper({ port = 7962, running = 'version-cec3ad5889b447
   const state = {
     running, startedAt: Date.now(), offsets: null, macros: null, settings: null, hotkeys: null, posts: [],
     rec: { state: 'idle', events: 0, startedAt: 0, timer: null, result: null },
+    capture: { id: 0, active: false, code: null, opts: null },
   };
   const status = () => ({
     ok: true, helper: 'gerenciador-helper', helperVersion: '2.3.0', platform: 'win32', ffiReady: true,
@@ -25,6 +26,7 @@ export function startMockHelper({ port = 7962, running = 'version-cec3ad5889b447
     const path = req.url.split('?')[0];
     if (req.method === 'GET') {
       if (path === '/status') return send(status());
+      if (path === '/capture/status') return send({ ok: true, id: state.capture.id, active: state.capture.active, code: state.capture.code });
       if (path === '/macro/record/status') {
         const r = state.rec;
         if (r.state === 'recording') r.events += 3;
@@ -67,6 +69,10 @@ export function startMockHelper({ port = 7962, running = 'version-cec3ad5889b447
           r.state = 'done';
           return send({ ok: true, ...r.result });
         }
+        case '/capture/start':
+          Object.assign(state.capture, { id: state.capture.id + 1, active: true, code: null, opts: data });
+          return send({ ok: true, id: state.capture.id, hookReady: true, message: 'Pressione um botão ou tecla.' });
+        case '/capture/stop': state.capture.active = false; return send({ ok: true, message: 'Captura encerrada.' });
         case '/macro/cursor': return send({ ok: true, x: 640, y: 360 });
         case '/macro/stop': return send({ ok: true, stopped: 0, message: 'Nenhum macro rodando.' });
         case '/pause': return send({ ok: true, message: 'Configurações despausadas.' });
@@ -75,5 +81,7 @@ export function startMockHelper({ port = 7962, running = 'version-cec3ad5889b447
       }
     });
   });
-  return new Promise((resolve) => server.listen(port, '127.0.0.1', () => resolve({ state, close: () => new Promise((r) => server.close(r)), restart() { state.startedAt = Date.now(); state.offsets = null; state.macros = null; state.hotkeys = null; } })));
+  return new Promise((resolve) => server.listen(port, '127.0.0.1', () => resolve({ state, close: () => new Promise((r) => server.close(r)), restart() { state.startedAt = Date.now(); state.offsets = null; state.macros = null; state.hotkeys = null; },
+    // Simula o hook do Windows vendo um botão/tecla durante a captura.
+    press(code) { const c = state.capture; if (!c.active) return false; c.code = code; c.active = false; return true; } })));
 }
