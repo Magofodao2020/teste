@@ -447,6 +447,43 @@ describe('ações e macros', () => {
     await ctx.close();
   });
 
+  it('categorias: retrair/abrir, ativar categoria, mover por categoria no editor e exportar com as ações', async () => {
+    const { page, ctx } = await open({ [LIVE_URL]: { body: V_SITE } });
+    await page.goto(`${SITE}#/acoes`);
+    const cat = (name) => page.locator('.cat-group', { has: page.locator('.cat-name', { hasText: new RegExp(`^${name}$`) }) });
+    // Modelos já vêm em duas categorias
+    assert.deepEqual(await page.locator('.cat-name').allInnerTexts(), ['Bug Indi', 'GK']);
+
+    // Retrair GK esconde as ações dela; abrir mostra de novo
+    assert.equal(await cat('GK').locator('.macro-row').count(), 2);
+    await cat('GK').locator('.cat-toggle').click();
+    await waitFor(async () => (await cat('GK').locator('.macro-row').count()) === 0);
+    await cat('GK').locator('.cat-toggle').click();
+    await waitFor(async () => (await cat('GK').locator('.macro-row').count()) === 2);
+
+    // Ativar categoria GK ativa só as duas ações de GK
+    await cat('GK').getByRole('button', { name: 'Ativar categoria', exact: true }).click();
+    await waitFor(() => enabledIds().join() === 'gagatech,perfect-dive');
+    await cat('GK').getByRole('button', { name: 'Desativar categoria', exact: true }).click();
+    await waitFor(() => enabledIds().length === 0);
+
+    // Mover "Bug Indi" para uma categoria nova pelo editor
+    await row(page, 'Bug Indi').getByRole('button', { name: 'Editar' }).click();
+    await page.getByLabel('Categoria da ação').fill('Testes');
+    await page.getByRole('button', { name: 'Salvar' }).click();
+    // Categoria é conceito só do site (não vai ao Helper): confere pelo DOM.
+    await waitFor(async () => (await cat('Testes').locator('.macro-name').allInnerTexts()).join() === 'Bug Indi');
+    assert.equal(await cat('Bug Indi').locator('.macro-row').count(), 2);
+
+    // Exportar a categoria GK: o JSON leva as ações dela e a categoria
+    await cat('GK').getByRole('button', { name: 'Exportar categoria GK' }).click();
+    const json = await page.getByLabel('JSON exportado').inputValue();
+    const pack = JSON.parse(json);
+    assert.equal(pack.category, 'GK');
+    assert.deepEqual(pack.macros.map((m) => [m.name, m.group]), [['Perfect Dive', 'GK'], ['Gagatech', 'GK']]);
+    await ctx.close();
+  });
+
   it('Helper reiniciado recebe offsets, ações e atalhos de novo', async () => {
     const { ctx } = await open({ [LIVE_URL]: { body: V_SITE } });
     await waitFor(() => helper.state.offsets && helper.state.macros);

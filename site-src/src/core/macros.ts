@@ -306,6 +306,46 @@ export function setAllEnabled(st: MacrosState, enabled: boolean): MacrosState {
   return { ...st, macros: st.macros.map((m) => ({ ...m, enabled: enabled && canActivate(m) })) };
 }
 
+// ───────── categorias (o campo `group` de cada ação) ─────────
+
+export const UNCATEGORIZED_KEY = '\u0000'; // chave interna do grupo "Sem categoria"
+
+export interface MacroGroup { key: string; name: string | null; macros: Macro[] }
+
+const groupName = (m: Macro) => (m.group && m.group.trim() ? m.group.trim() : null);
+
+/** Agrupa as ações por categoria, preservando a ordem de aparição. */
+export function groupMacros(macros: Macro[]): MacroGroup[] {
+  const order: string[] = [];
+  const by = new Map<string, Macro[]>();
+  for (const m of macros) {
+    const name = groupName(m);
+    const key = name ?? UNCATEGORIZED_KEY;
+    if (!by.has(key)) { by.set(key, []); order.push(key); }
+    by.get(key)!.push(m);
+  }
+  return order.map((key) => ({ key, name: key === UNCATEGORIZED_KEY ? null : key, macros: by.get(key)! }));
+}
+
+/** Nomes de categoria existentes (para sugerir no editor), em ordem alfabética. */
+export function categoryNames(macros: Macro[]): string[] {
+  const set = new Set<string>();
+  for (const m of macros) { const n = groupName(m); if (n) set.add(n); }
+  return [...set].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+}
+
+/** Ativa/desativa todas as ações de uma categoria (null = "Sem categoria"). */
+export function setCategoryEnabled(st: MacrosState, category: string | null, enabled: boolean): MacrosState {
+  return { ...st, macros: st.macros.map((m) => (groupName(m) === category ? { ...m, enabled: enabled && canActivate(m) } : m)) };
+}
+
+/** Renomeia uma categoria (muda o `group` de todas as ações dela). Vazio = sem categoria. */
+export function renameCategory(st: MacrosState, from: string, to: string): MacrosState {
+  const t = to.trim().slice(0, 40);
+  const now = Date.now();
+  return { ...st, macros: st.macros.map((m) => (groupName(m) === from ? { ...m, group: t || undefined, updatedAt: now } : m)) };
+}
+
 export function upsertMacro(st: MacrosState, m: Macro): MacrosState {
   const exists = st.macros.some((x) => x.id === m.id);
   const fixed = { ...m, enabled: m.enabled && canActivate(m), updatedAt: Date.now() };
@@ -353,13 +393,22 @@ export function toHelperMacro(m: Macro) {
 
 export function toExport(m: Macro) {
   return {
-    bope: 'macro', v: 1, name: m.name, mode: m.mode, repeat: m.repeat, loopDelay: m.loopDelay,
+    bope: 'macro', v: 1, name: m.name, ...(m.group ? { group: m.group } : {}), mode: m.mode, repeat: m.repeat, loopDelay: m.loopDelay,
     speed: m.speed, robloxOnly: m.robloxOnly, steps: m.steps, ...(m.trigger ? { trigger: m.trigger } : {}),
   };
 }
 
+/**
+ * Exporta um pacote. A categoria de cada ação (`group`) vai junto, então importar
+ * recria as categorias. `category` no topo é só informativo (o que vale é o group
+ * de cada ação); fica preenchido quando o pacote é de uma única categoria.
+ */
 export function exportPack(macros: Macro[]): string {
-  return JSON.stringify({ bope: 'macro-pack', v: 1, macros: macros.map(toExport) }, null, 2);
+  const cats = [...new Set(macros.map((m) => m.group).filter(Boolean))];
+  const pack: Record<string, unknown> = { bope: 'macro-pack', v: 1 };
+  if (cats.length === 1) pack.category = cats[0];
+  pack.macros = macros.map(toExport);
+  return JSON.stringify(pack, null, 2);
 }
 
 const CODE_PREFIXES = { plain: ['BOPE-SEQ1:', 'BOPE-MACRO1:'], deflate: ['BOPE-SEQ1Z:', 'BOPE-MACRO1Z:'] };

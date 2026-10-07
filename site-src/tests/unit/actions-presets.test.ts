@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_PACK, canActivate, decodeShare, defaultMacrosState, duplicateMacro, moveItem, parseMacroImport,
-  restoreMacrosState, sanitizeMacro, setAllEnabled, setEnabled, toHelperMacro, upsertMacro,
+  DEFAULT_PACK, canActivate, categoryNames, decodeShare, defaultMacrosState, duplicateMacro, exportPack, groupMacros, moveItem, parseMacroImport,
+  renameCategory, restoreMacrosState, sanitizeMacro, setAllEnabled, setCategoryEnabled, setEnabled, toHelperMacro, upsertMacro,
 } from '../../src/core/macros';
 import { buildIndex, parseSiteDataset } from '../../src/core/offsets/dataset';
 import {
@@ -105,6 +105,44 @@ describe('ações e macros', () => {
     expect(m.steps.map((s) => s.t)).toEqual(['flick', 'key']);
     expect(m.steps[0].dx).toBe(100000);
     expect(m.steps[1].hold).toBe(0);
+  });
+
+  it('categorias: agrupa por "group" preservando a ordem, com bucket sem categoria', () => {
+    const st = defaultMacrosState();
+    const semCat = { ...st.macros[0], id: 'livre', name: 'Livre', group: undefined };
+    const groups = groupMacros([...st.macros, semCat]);
+    expect(groups.map((g) => [g.name, g.macros.length])).toEqual([['Bug Indi', 3], ['GK', 2], [null, 1]]);
+    expect(categoryNames([...st.macros, semCat])).toEqual(['Bug Indi', 'GK']);
+  });
+
+  it('ativar/desativar por categoria só afeta a categoria (e pula sem botão/etapas)', () => {
+    let st = defaultMacrosState();
+    st = setCategoryEnabled(st, 'GK', true);
+    expect(st.macros.filter((m) => m.enabled).map((m) => m.group)).toEqual(['GK', 'GK']);
+    st = upsertMacro(st, { ...st.macros[0], id: 'gk-sem-botao', name: 'Z', group: 'GK', trigger: null });
+    st = setCategoryEnabled(st, 'GK', true);
+    expect(st.macros.find((m) => m.id === 'gk-sem-botao')!.enabled).toBe(false); // sem botão não ativa
+    st = setCategoryEnabled(st, 'GK', false);
+    expect(st.macros.some((m) => m.enabled)).toBe(false);
+  });
+
+  it('renomear categoria muda o group de todas as ações dela; vazio remove a categoria', () => {
+    let st = defaultMacrosState();
+    st = renameCategory(st, 'GK', 'Goleiro');
+    expect(st.macros.filter((m) => m.group === 'Goleiro').map((m) => m.name)).toEqual(['Perfect Dive', 'Gagatech']);
+    expect(st.macros.some((m) => m.group === 'GK')).toBe(false);
+    st = renameCategory(st, 'Goleiro', '   ');
+    expect(st.macros.filter((m) => m.name === 'Perfect Dive')[0].group).toBeUndefined();
+  });
+
+  it('exportar leva a categoria junto e importar a recria', async () => {
+    const st = defaultMacrosState();
+    const gk = st.macros.filter((m) => m.group === 'GK');
+    const json = exportPack(gk);
+    expect(JSON.parse(json).category).toBe('GK');
+    const back = await parseMacroImport(json);
+    expect(back.map((m) => [m.name, m.group])).toEqual([['Perfect Dive', 'GK'], ['Gagatech', 'GK']]);
+    expect(back.every((m) => !m.enabled)).toBe(true);
   });
 
   it('importação: JSON, pacote e código BOPE-SEQ1 do site antigo — sempre desativadas, sem AHK', async () => {

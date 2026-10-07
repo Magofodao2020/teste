@@ -4,7 +4,7 @@
 import { useSyncExternalStore } from 'react';
 import {
   type Macro, type MacrosState, TEMPLATES, defaultMacrosState, duplicateMacro, fromTemplate, newMacroId, removeMacro,
-  restoreMacrosState, setAllEnabled, setEnabled, toHelperMacro, upsertMacro,
+  restoreMacrosState, setAllEnabled, setCategoryEnabled, setEnabled, renameCategory, toHelperMacro, upsertMacro,
 } from '../core/macros';
 import { type FlagValue, toHelperValue } from '../core/flags';
 import { HelperClient, type HelperResult, type HelperStatus } from '../core/helper/client';
@@ -412,6 +412,28 @@ export class AppStore {
   setMacroTrigger(id: string, trigger: string | null) {
     const m = this.state.macros.macros.find((x) => x.id === id);
     if (m) this.saveMacros(upsertMacro(this.state.macros, { ...m, trigger }));
+  }
+  /** Move uma ação para uma categoria (vazio = sem categoria). */
+  setMacroCategory(id: string, group: string | null) {
+    const m = this.state.macros.macros.find((x) => x.id === id);
+    if (!m) return;
+    const g = group && group.trim() ? group.trim().slice(0, 40) : undefined;
+    this.saveMacros(upsertMacro(this.state.macros, { ...m, group: g }));
+  }
+  /** Ativa/desativa todas as ações de uma categoria (null = sem categoria). */
+  setCategoryEnabled(category: string | null, enabled: boolean) {
+    const next = setCategoryEnabled(this.state.macros, category, enabled);
+    this.saveMacros(next);
+    if (enabled) {
+      const inCat = next.macros.filter((m) => (m.group && m.group.trim() ? m.group.trim() : null) === category);
+      const skipped = inCat.filter((m) => !m.enabled).length;
+      if (skipped) this.toast('info', `${skipped} ${skipped === 1 ? 'ação sem botão ou sem etapas não foi ativada' : 'ações sem botão ou sem etapas não foram ativadas'}.`);
+    }
+  }
+  renameCategory(from: string, to: string) {
+    if (to.trim() === from) return;
+    this.saveMacros(renameCategory(this.state.macros, from, to));
+    this.toast('success', to.trim() ? `Categoria renomeada para "${to.trim().slice(0, 40)}".` : 'Categoria removida (ações ficaram sem categoria).');
   }
   /** Salva (cria ou atualiza). Macros novas entram desativadas. */
   saveMacro(m: Macro) {

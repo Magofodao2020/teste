@@ -154,7 +154,7 @@ export function ImportMacrosDialog({ onClose }: { onClose: () => void }) {
       </label>
       <textarea className="textarea" value={text} onChange={(e) => setText(e.target.value)} aria-label="Dados para importar" spellCheck={false} placeholder='{"bope":"macro","v":1,"name":"Minha macro","steps":[...]}' />
       {parsed && (parsed.ok
-        ? <Notice tone="ok">{parsed.macros.length} {parsed.macros.length === 1 ? 'ação' : 'ações'}: {parsed.macros.map((m) => m.name).join(', ')}. Entram desativadas.</Notice>
+        ? <Notice tone="ok">{parsed.macros.length} {parsed.macros.length === 1 ? 'ação' : 'ações'}: {parsed.macros.map((m) => m.name).join(', ')}.{(() => { const c = [...new Set(parsed.macros.map((m) => m.group).filter(Boolean))]; return c.length ? ` Categoria(s): ${c.join(', ')}.` : ''; })()} Entram desativadas.</Notice>
         : <Notice tone="err">{parsed.error}</Notice>)}
     </Modal>
   );
@@ -162,9 +162,12 @@ export function ImportMacrosDialog({ onClose }: { onClose: () => void }) {
 
 // ───────── exportar ─────────
 
-export function ExportMacrosDialog({ macros, onClose }: { macros: Macro[]; onClose: () => void }) {
+export function ExportMacrosDialog({ macros, label, onClose }: { macros: Macro[]; label?: string; onClose: () => void }) {
   const json = useMemo(() => exportPack(macros), [macros]);
-  const title = macros.length === 1 ? `Exportar “${macros[0].name}”` : `Exportar ${macros.length} ações`;
+  const cats = useMemo(() => [...new Set(macros.map((m) => m.group).filter(Boolean))] as string[], [macros]);
+  const title = macros.length === 1 ? `Exportar “${macros[0].name}”`
+    : label && label !== 'todas' ? `Exportar categoria “${label}” (${macros.length} ${macros.length === 1 ? 'ação' : 'ações'})`
+      : `Exportar ${macros.length} ações`;
   const copy = async () => {
     try { await navigator.clipboard.writeText(json); store.toast('success', 'JSON copiado.'); } catch { store.toast('error', 'Não foi possível copiar. Selecione o texto e copie manualmente.'); }
   };
@@ -172,13 +175,18 @@ export function ExportMacrosDialog({ macros, onClose }: { macros: Macro[]; onClo
     const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${macros.length === 1 ? macros[0].name.replace(/[^\w\- ]+/g, '').trim() || 'acao' : 'acoes-bope'}.json`;
+    const base = macros.length === 1 ? macros[0].name
+      : label && label !== 'todas' ? `categoria-${label}`
+        : 'acoes-bope';
+    a.download = `${base.replace(/[^\w\- ]+/g, '').trim() || 'acoes'}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   return (
     <Modal title={title} wide onClose={onClose} footer={<><Button icon={<Copy />} onClick={() => void copy()}>Copiar</Button><Button variant="primary" icon={<Download />} onClick={download}>Baixar .json</Button></>}>
-      <p className="muted" style={{ margin: 0 }}>O estado ativa/desativada não é exportado: quem importar recebe as ações desativadas.</p>
+      <p className="muted" style={{ margin: 0 }}>
+        A categoria de cada ação vai junto, então importar recria as categorias{cats.length ? ` (${cats.join(', ')})` : ''}. O estado ativa/desativada não é exportado: quem importar recebe as ações desativadas.
+      </p>
       <textarea className="textarea" readOnly value={json} aria-label="JSON exportado" style={{ minHeight: 280 }} />
     </Modal>
   );

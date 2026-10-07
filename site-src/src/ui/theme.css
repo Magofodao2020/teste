@@ -265,6 +265,13 @@ button.keycap:hover { border-color: var(--gold); }
 .macro-main { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
 .macro-name { font-size: 15px; overflow-wrap: anywhere; }
 .macro-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.cat-group { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2, var(--bg-2)); overflow: hidden; }
+.cat-group.has-active { border-color: var(--red-line); }
+.cat-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 12px; background: var(--surface-3, var(--bg-2)); border-bottom: 1px solid var(--border); }
+.cat-toggle { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto; background: none; border: 0; cursor: pointer; color: var(--text); padding: 4px; border-radius: 8px; text-align: left; }
+.cat-toggle:hover { background: var(--surface); }
+.cat-name { font-weight: 700; font-size: 14.5px; overflow-wrap: anywhere; }
+.cat-body { padding: 10px 12px 12px; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 16px 20px; align-items: start; }
 .num-field .input { max-width: 160px; font-family: var(--mono); font-size: 12.5px; }
 .step-card { display: grid; gap: 12px; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--bg-2); }

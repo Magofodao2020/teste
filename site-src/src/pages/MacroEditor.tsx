@@ -4,7 +4,7 @@ import {
 import { type ReactNode, useMemo, useState } from 'react';
 import {
   MODES, MOUSE_BUTTONS, type Macro, type MacroMode, type MacroStep, STEP_LABEL, STEP_TYPES, type StepType,
-  defaultStep, describeStep, macroMs, macroProblems, moveItem, sanitizeMacro, sanitizeStep,
+  categoryNames, defaultStep, describeStep, macroMs, macroProblems, moveItem, sanitizeMacro, sanitizeStep,
 } from '../core/macros';
 import { store, useApp } from '../state/store';
 import { Button, Card, Confirm, KeyCapture, Notice, Switch } from '../ui/components';
@@ -15,6 +15,8 @@ import { Button, Card, Confirm, KeyCapture, Notice, Switch } from '../ui/compone
  */
 export function MacroEditor({ initial, isNew, onClose }: { initial: Macro; isNew: boolean; onClose: () => void }) {
   const helper = useApp((s) => s.helper);
+  const allMacros = useApp((s) => s.macros.macros);
+  const existingCats = useMemo(() => categoryNames(allMacros), [allMacros]);
   const [m, setM] = useState<Macro>(() => structuredClone(initial));
   const [addType, setAddType] = useState<StepType>('key');
   const [dragFrom, setDragFrom] = useState<number | null>(null);
@@ -60,6 +62,20 @@ export function MacroEditor({ initial, isNew, onClose }: { initial: Macro; isNew
           <label className="col">
             <span className="field-label">Nome</span>
             <input className="input" value={m.name} maxLength={80} onChange={(e) => patch({ name: e.target.value })} aria-label="Nome da ação" />
+          </label>
+          <label className="col">
+            <span className="field-label">Categoria</span>
+            <input
+              className="input"
+              list="bope-categorias"
+              value={m.group ?? ''}
+              maxLength={40}
+              placeholder="Sem categoria"
+              onChange={(e) => patch({ group: e.target.value.trim() ? e.target.value : undefined })}
+              aria-label="Categoria da ação"
+            />
+            <datalist id="bope-categorias">{existingCats.map((c) => <option key={c} value={c} />)}</datalist>
+            <span className="faint" style={{ fontSize: 12 }}>Agrupa a ação na lista. Deixe em branco para ficar sem categoria.</span>
           </label>
           <div className="col">
             <span className="field-label">Botão ou tecla que ativa</span>
