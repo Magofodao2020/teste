@@ -13,6 +13,7 @@ const writes = [];
 let running = true;
 let startTime = 1000n;
 const failWrites = new Set();
+const keysDown = new Set();
 function find(addr, len) { return regions.find((r) => addr >= r.base && addr + len <= r.base + r.size); }
 const mem = {
   BASE, VERSION, PID, regions, writes,
@@ -20,6 +21,8 @@ const mem = {
   poke(addr, data) { const r = find(addr, data.length); data.copy(r.buf, addr - r.base); },
   setRunning(v) { running = v; },
   failWrites,
+  keyDown(vk) { keysDown.add(vk & 0xff); },
+  keyUp(vk) { keysDown.delete(vk & 0xff); },
   // Roblox fechado e aberto de novo com o MESMO PID: horário de criação diferente.
   restart(memory) { startTime += 1n; if (memory) memory.copy(regions[0].buf); },
 };
@@ -36,6 +39,8 @@ const impl = {
   QueryFullProcessImageNameW: (h, f, buf, size) => { const b = Buffer.from(EXE, 'utf16le'); b.copy(buf); size[0] = EXE.length; return 1; },
   FindWindowW: () => (running ? 1 : 0),
   GetWindowThreadProcessId: (hwnd, out) => { out[0] = PID; return 1; },
+  GetAsyncKeyState: (vk) => (keysDown.has(vk & 0xff) ? 0x8000 : 0),
+  MapVirtualKeyW: () => 0,
   GetExitCodeProcess: (h, out) => { out[0] = running ? 259 : 0; return 1; },
   GetProcessTimes: (h, c) => { c.writeBigUInt64LE(startTime, 0); return 1; },
   NtReadVirtualMemory: (h, addr, buf, len, br) => { const d = mem.read(addr, len); if (!d) return -1; d.copy(buf); br[0] = len; return 0; },
