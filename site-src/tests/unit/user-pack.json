@@ -1,0 +1,146 @@
+{
+  "bope": "macro-pack",
+  "v": 1,
+  "macros": [
+    {
+      "bope": "macro",
+      "v": 1,
+      "name": "Bug Indi",
+      "mode": "once",
+      "repeat": 1,
+      "loopDelay": 0,
+      "speed": 1,
+      "robloxOnly": true,
+      "steps": [
+        {
+          "t": "flick",
+          "btn": "left",
+          "pre": 20,
+          "hold": 400,
+          "afterUp": 15,
+          "dx": 0,
+          "dy": 20001,
+          "moveDur": 0,
+          "afterMove": 0,
+          "cooldown": 0
+        }
+      ],
+      "trigger": "MouseBack"
+    },
+    {
+      "bope": "macro",
+      "v": 1,
+      "name": "Bug indi ESQUERDA",
+      "mode": "once",
+      "repeat": 1,
+      "loopDelay": 0,
+      "speed": 1,
+      "robloxOnly": true,
+      "steps": [
+        {
+          "t": "flick",
+          "btn": "left",
+          "pre": 20,
+          "hold": 400,
+          "afterUp": 15,
+          "dx": -150,
+          "dy": 0,
+          "moveDur": 0,
+          "afterMove": 0,
+          "cooldown": 0
+        }
+      ],
+      "trigger": "MouseForward"
+    },
+    {
+      "bope": "macro",
+      "v": 1,
+      "name": "Bug indi DIREITA",
+      "mode": "once",
+      "repeat": 1,
+      "loopDelay": 0,
+      "speed": 1,
+      "robloxOnly": true,
+      "steps": [
+        {
+          "t": "flick",
+          "btn": "left",
+          "pre": 20,
+          "hold": 400,
+          "afterUp": 15,
+          "dx": 150,
+          "dy": 0,
+          "moveDur": 0,
+          "afterMove": 0,
+          "cooldown": 0
+        }
+      ],
+      "trigger": "MouseBack"
+    },
+    {
+      "bope": "macro",
+      "v": 1,
+      "name": "Perfect Dive",
+      "mode": "once",
+      "repeat": 1,
+      "loopDelay": 0,
+      "speed": 1,
+      "robloxOnly": true,
+      "steps": [
+        {
+          "t": "key",
+          "code": "Space",
+          "n": 1,
+          "hold": 30,
+          "gap": 60
+        },
+        {
+          "t": "wait",
+          "ms": 8
+        },
+        {
+          "t": "key",
+          "code": "KeyQ",
+          "n": 1,
+          "hold": 30,
+          "gap": 60
+        }
+      ],
+      "trigger": "MouseRight"
+    },
+    {
+      "bope": "macro",
+      "v": 1,
+      "name": "Gagatech",
+      "mode": "once",
+      "repeat": 1,
+      "loopDelay": 0,
+      "speed": 1,
+      "robloxOnly": true,
+      "steps": [
+        {
+          "t": "key",
+          "code": "Space",
+          "n": 1,
+          "hold": 0,
+          "gap": 60
+        },
+        {
+          "t": "key",
+          "code": "KeyC",
+          "n": 1,
+          "hold": 0,
+          "gap": 60
+        },
+        {
+          "t": "key",
+          "code": "KeyQ",
+          "n": 1,
+          "hold": 0,
+          "gap": 60
+        }
+      ],
+      "trigger": "MouseForward"
+    }
+  ]
+}
