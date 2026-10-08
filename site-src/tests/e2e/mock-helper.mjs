@@ -7,6 +7,7 @@ export function startMockHelper({ port = 7962, running = 'version-cec3ad5889b447
     running, startedAt: Date.now(), offsets: null, macros: null, settings: null, hotkeys: null, posts: [],
     rec: { state: 'idle', events: 0, startedAt: 0, timer: null, result: null },
     capture: { id: 0, active: false, code: null, opts: null },
+    turbo: { enabled: false, intervalMs: 1000, reapplied: 0 },
   };
   const status = () => ({
     ok: true, helper: 'gerenciador-helper', helperVersion: '2.3.0', platform: 'win32', ffiReady: true,
@@ -16,6 +17,7 @@ export function startMockHelper({ port = 7962, running = 'version-cec3ad5889b447
       ? { state: 'running', version: state.running, pid: 4242, reason: `Versão em execução: ${state.running}`, instances: [] }
       : { state: 'not-running', version: null, pid: null, reason: 'Roblox não está em execução.', instances: [] },
     siteOffsetsBuild: state.offsets?.version ?? null, offsetsBuild: state.offsets?.version ?? null, canApply: true,
+    turbo: state.turbo,
   });
   const server = http.createServer((req, res) => {
     const send = (obj) => {
@@ -45,6 +47,7 @@ export function startMockHelper({ port = 7962, running = 'version-cec3ad5889b447
           return send({ ok: true, message: 'ok' });
         case '/set-macros': state.macros = data.macros; state.settings = data.settings; return send({ ok: true, count: data.macros.length, active: 0, message: 'ok' });
         case '/set-hotkeys': state.hotkeys = data; return send({ ok: true, message: 'ok' });
+        case '/turbo': state.turbo = { enabled: !!data.enabled, intervalMs: data.intervalMs, reapplied: 0 }; return send({ ok: true, enabled: !!data.enabled, intervalMs: data.intervalMs, message: 'ok' });
         case '/apply': {
           if (!state.offsets) return send({ ok: false, blocked: true, message: 'O Helper ainda não recebeu os offsets do site.' });
           if (state.running !== state.offsets.version || (data.dumpVersion && data.dumpVersion !== state.running)) {

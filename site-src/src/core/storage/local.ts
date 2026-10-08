@@ -39,9 +39,14 @@ export function removeKey(key: string) {
   try { localStorage.removeItem(key); } catch { /* bloqueado */ }
 }
 
+export interface TurboPrefs { enabled: boolean; intervalMs: number }
+export const TURBO_INTERVALS = [250, 500, 1000, 2000, 5000];
+
 export interface Prefs {
   activePresetId: string | null;
   sidebarCollapsed: boolean;
+  /** Modo turbo (reaplicar flags que o Roblox voltar). Desligado por padrão. */
+  turbo: TurboPrefs;
 }
 
 export function loadPrefs(): Prefs {
@@ -49,6 +54,10 @@ export function loadPrefs(): Prefs {
   return {
     activePresetId: typeof p.activePresetId === 'string' ? p.activePresetId : null,
     sidebarCollapsed: p.sidebarCollapsed === true,
+    turbo: {
+      enabled: p.turbo?.enabled === true,
+      intervalMs: TURBO_INTERVALS.includes(Number(p.turbo?.intervalMs)) ? Number(p.turbo?.intervalMs) : 1000,
+    },
   };
 }
 
@@ -68,7 +77,7 @@ export function migrateLegacyLocalStorage() {
     for (const key of LEGACY.prefs) {
       const old = readJson<{ activePresetId?: unknown }>(key);
       if (old && typeof old.activePresetId === 'string') {
-        savePrefs({ activePresetId: old.activePresetId, sidebarCollapsed: false });
+        savePrefs({ activePresetId: old.activePresetId, sidebarCollapsed: false, turbo: { enabled: false, intervalMs: 1000 } });
         break;
       }
     }

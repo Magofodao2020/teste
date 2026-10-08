@@ -30,6 +30,8 @@ export interface HelperStatus {
   canApply: boolean;
   /** Processo do Roblox (PID + horário de criação) e originais que o Helper capturou nele. */
   flagSession?: string | null;
+  /** Modo turbo no Helper (null = Helper antigo, sem turbo). */
+  turbo: { enabled: boolean; intervalMs: number } | null;
   originals?: FlagOriginal[];
 }
 
@@ -67,6 +69,9 @@ export function parseStatus(port: number, s: Record<string, unknown>): HelperSta
     siteOffsetsBuild: str(s.siteOffsetsBuild),
     canApply: !!s.canApply,
     flagSession: str(s.flagSession),
+    turbo: s.turbo && typeof s.turbo === 'object'
+      ? { enabled: !!(s.turbo as Record<string, unknown>).enabled, intervalMs: Number((s.turbo as Record<string, unknown>).intervalMs) || 1000 }
+      : null,
     originals: parseOriginals(s.originals),
   };
 }
@@ -119,6 +124,7 @@ export class HelperClient {
     return this.post('/set-offsets', { version, names, addresses }, BIG_POST_TIMEOUT_MS);
   }
   setMacros(macros: unknown[], settings: unknown) { return this.post('/set-macros', { macros, settings }); }
+  setTurbo(enabled: boolean, intervalMs: number) { return this.post('/turbo', { enabled, intervalMs }); }
   setOriginals(sessions: unknown[]) { return this.post('/set-originals', { sessions }); }
   setHotkeys(hotkeys: unknown, flags: Record<string, string>) { return this.post('/set-hotkeys', { hotkeys, flags }); }
   apply(flags: Record<string, string>, dumpVersion: string) { return this.post('/apply', { flags, dumpVersion }); }

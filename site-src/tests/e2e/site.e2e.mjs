@@ -628,6 +628,23 @@ describe('presets e flags inválidas', () => {
     await page.getByText('Todas as 2 configurações aplicadas na memória.').waitFor();
     const apply = helper.state.posts.find((p) => p.path === '/apply');
     assert.deepEqual(apply.data, { flags: { DFIntTaskSchedulerTargetFps: '240', FFlagAbuseReport: 'true' }, dumpVersion: V_SITE });
+
+    // Modo turbo: começa desligado; ligar envia ao Helper e é lembrado.
+    const sw = page.getByRole('switch', { name: 'Modo turbo' });
+    assert.equal(await sw.getAttribute('aria-checked'), 'false');
+    assert.equal(helper.state.turbo.enabled, false);
+    await page.getByLabel('Intervalo do turbo').selectOption('500');
+    await sw.click();
+    await waitFor(() => helper.state.turbo.enabled === true && helper.state.turbo.intervalMs === 500);
+    // Helper reiniciado (volta desligado): o site reenvia a escolha.
+    helper.state.turbo = { enabled: false, intervalMs: 1000, reapplied: 0 };
+    helper.state.startedAt = Date.now();
+    await page.reload();
+    await page.waitForSelector('.topbar');
+    await waitFor(() => helper.state.turbo.enabled === true && helper.state.turbo.intervalMs === 500);
+    await page.goto(`${SITE}#/presets`);
+    await page.getByRole('switch', { name: 'Modo turbo' }).click();
+    await waitFor(() => helper.state.turbo.enabled === false);
     await ctx.close();
   });
 

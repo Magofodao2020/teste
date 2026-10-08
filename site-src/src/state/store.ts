@@ -17,7 +17,7 @@ import {
   normalizePreset, removeInvalidFlags, sanitizeHotkeys, uniqueName,
 } from '../core/presets';
 import { type KV, openStorage } from '../core/storage/db';
-import { KEYS, loadPrefs, migrateLegacyLocalStorage, readJson, removeKey, savePrefs, writeJson } from '../core/storage/local';
+import { KEYS, type TurboPrefs, loadPrefs, migrateLegacyLocalStorage, readJson, removeKey, savePrefs, writeJson } from '../core/storage/local';
 
 export type ToastKind = 'success' | 'error' | 'info';
 export interface Toast { id: number; kind: ToastKind; text: string }
@@ -37,6 +37,7 @@ export interface AppState {
   sidebarCollapsed: boolean;
   toasts: Toast[];
   busy: Partial<Record<'apply' | 'pause' | 'resume', boolean>>;
+  turbo: TurboPrefs;
 }
 
 const POLL_VISIBLE_MS = 5_000;
@@ -63,13 +64,13 @@ export class AppStore {
 
   constructor(private deps: { fetch: typeof fetch; base: string; idb?: IDBFactory }) {
     this.helper = new HelperClient(deps.fetch);
-    const prefs = typeof localStorage !== 'undefined' ? loadPrefs() : { activePresetId: null, sidebarCollapsed: false };
+    const prefs = typeof localStorage !== 'undefined' ? loadPrefs() : { activePresetId: null, sidebarCollapsed: false, turbo: { enabled: false, intervalMs: 1000 } };
     this.state = {
       ready: false, bootError: null, storagePersistent: true,
       offsets: { status: 'loading', liveVersion: null, liveCheckedAt: null, dataset: null, source: null, lastSyncAt: null, error: null, diagnostic: null },
       index: null, helper: null, helperChecked: false,
       presets: [], activePresetId: prefs.activePresetId, hotkeys: {}, macros: defaultMacrosState(),
-      sidebarCollapsed: prefs.sidebarCollapsed, toasts: [], busy: {},
+      sidebarCollapsed: prefs.sidebarCollapsed, toasts: [], busy: {}, turbo: prefs.turbo,
     };
   }
 
@@ -195,6 +196,11 @@ export class AppStore {
       this.queue(() => this.pushMacros());
       this.queue(() => this.pushHotkeys());
     }
+    // Turbo: o Helper começa desligado; reenvia a escolha se ela não bate.
+    const t = this.state.turbo;
+    if (st.turbo && (st.turbo.enabled !== t.enabled || (t.enabled && st.turbo.intervalMs !== t.intervalMs))) {
+      this.queue(() => this.helper.setTurbo(t.enabled, t.intervalMs));
+    }
     const ds = this.state.offsets.dataset;
     if (ds && st.siteOffsetsBuild !== ds.version) this.queue(() => this.pushOffsets(false));
     return st;
@@ -293,7 +299,7 @@ export class AppStore {
   }
 
   private savePrefs() {
-    savePrefs({ activePresetId: this.state.activePresetId, sidebarCollapsed: this.state.sidebarCollapsed });
+    savePrefs({ activePresetId: this.state.activePresetId, sidebarCollapsed: this.state.sidebarCollapsed, turbo: this.state.turbo });
   }
 
   private async persistPreset(p: Preset) {
@@ -378,6 +384,17 @@ export class AppStore {
         .catch(() => { this.builtinCache = null; return []; });
     }
     return this.builtinCache;
+  }
+
+  // ───────── modo turbo ─────────
+
+  async setTurbo(enabled: boolean, intervalMs = this.state.turbo.intervalMs) {
+    this.set({ turbo: { enabled, intervalMs } });
+    this.savePrefs();
+    if (!this.state.helper) return;
+    const r = await this.queue(() => this.helper.setTurbo(enabled, intervalMs));
+    if (!r.ok) this.toast('error', r.message);
+    void this.pollHelper();
   }
 
   // ───────── hotkeys de flags ─────────
