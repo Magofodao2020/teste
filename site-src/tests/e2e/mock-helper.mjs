@@ -7,7 +7,7 @@ export function startMockHelper({ port = 7962, running = 'version-cec3ad5889b447
     running, startedAt: Date.now(), offsets: null, macros: null, settings: null, hotkeys: null, posts: [],
     rec: { state: 'idle', events: 0, startedAt: 0, timer: null, result: null },
     capture: { id: 0, active: false, code: null, opts: null },
-    turbo: { enabled: false, intervalMs: 1000, reapplied: 0 },
+    turbo: { active: false, intervalMs: 1000, reapplied: 0 },
   };
   const status = () => ({
     ok: true, helper: 'gerenciador-helper', helperVersion: '2.3.0', platform: 'win32', ffiReady: true,
@@ -47,13 +47,13 @@ export function startMockHelper({ port = 7962, running = 'version-cec3ad5889b447
           return send({ ok: true, message: 'ok' });
         case '/set-macros': state.macros = data.macros; state.settings = data.settings; return send({ ok: true, count: data.macros.length, active: 0, message: 'ok' });
         case '/set-hotkeys': state.hotkeys = data; return send({ ok: true, message: 'ok' });
-        case '/turbo': state.turbo = { enabled: !!data.enabled, intervalMs: data.intervalMs, reapplied: 0 }; return send({ ok: true, enabled: !!data.enabled, intervalMs: data.intervalMs, message: 'ok' });
         case '/apply': {
           if (!state.offsets) return send({ ok: false, blocked: true, message: 'O Helper ainda não recebeu os offsets do site.' });
           if (state.running !== state.offsets.version || (data.dumpVersion && data.dumpVersion !== state.running)) {
             return send({ ok: false, blocked: true, buildMismatch: true, message: `Versão incompatível. offsets → ${state.offsets.version} · processo em execução → ${state.running}.` });
           }
           const n = Object.keys(data.flags).length;
+          state.turbo.active = true;
           return send({ ok: true, applied: n, message: `Todas as ${n} configurações aplicadas na memória.` });
         }
         case '/macro/run': return send({ ok: true, message: 'rodando' });
@@ -78,7 +78,7 @@ export function startMockHelper({ port = 7962, running = 'version-cec3ad5889b447
         case '/capture/stop': state.capture.active = false; return send({ ok: true, message: 'Captura encerrada.' });
         case '/macro/cursor': return send({ ok: true, x: 640, y: 360 });
         case '/macro/stop': return send({ ok: true, stopped: 0, message: 'Nenhum macro rodando.' });
-        case '/pause': return send({ ok: true, message: 'Configurações despausadas.' });
+        case '/pause': state.turbo.active = false; return send({ ok: true, message: 'Configurações despausadas.' });
         case '/resume': return send({ ok: true, message: 'Aplicado.' });
         default: return send({ ok: false, message: 'rota desconhecida' });
       }

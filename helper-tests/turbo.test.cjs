@@ -1,5 +1,5 @@
-// Modo turbo: o Roblox volta uma flag aplicada → o Helper reaplica sozinho.
-// Flag desligada (toggle) ou pausada não é reaplicada. Desligado por padrão.
+// Turbo faz parte do aplicar: depois de aplicar/retomar o Helper reaplica sozinho
+// as flags que o Roblox desfizer (a cada 1 s). Para ao pausar. Sem rota para desligar.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 require('./fakewin.cjs');
@@ -18,38 +18,46 @@ setInt(60); W.poke(at(0x101300), Buffer.from([0]));
 const post = async (p, b) => (await fetch(`http://127.0.0.1:${PORT}${p}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) })).json();
 const status = async () => (await fetch(`http://127.0.0.1:${PORT}/status`)).json();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const FLAGS = { DFIntSimX: '30', FFlagY: 'true' };
 
 test.before(async () => {
   for (let i = 0; i < 50; i++) { try { await status(); break; } catch { await sleep(50); } }
   await post('/set-offsets', { version: V, names, addresses });
 });
-test.after(async () => { await post('/turbo', { enabled: false }); console.log = realLog; setTimeout(() => process.exit(0), 50); });
+test.after(() => { console.log = realLog; setTimeout(() => process.exit(0), 50); });
 
-test('começa desligado: o Roblox desfaz e ninguém reaplica', async () => {
-  assert.deepEqual((await status()).turbo, { enabled: false, intervalMs: 1000, reapplied: 0 });
-  assert.equal((await post('/apply', { flags: { DFIntSimX: '30', FFlagY: 'true' }, dumpVersion: V })).ok, true);
-  setInt(60);
-  await sleep(400);
-  assert.equal(int(), 60);
+test('parado até aplicar; não existe rota para desligar', async () => {
+  assert.equal((await status()).turbo.active, false);
+  assert.equal((await post('/turbo', { enabled: false })).ok, false);
 });
 
-test('ligado: reaplica a flag que o Roblox desfez', async () => {
-  const r = await post('/turbo', { enabled: true, intervalMs: 250 });
-  assert.equal(r.enabled, true); assert.equal(r.intervalMs, 250);
-  await sleep(400);
-  assert.equal(int(), 30, 'voltou ao valor aplicado');
-  assert.equal(W.read(at(0x101300), 1)[0], 1, 'a outra flag continua aplicada');
-  setInt(77); W.poke(at(0x101300), Buffer.from([0]));
-  await sleep(400);
+test('aplicar liga o turbo: reaplica o que o Roblox desfizer', async () => {
+  assert.equal((await post('/apply', { flags: FLAGS, dumpVersion: V })).ok, true);
+  assert.equal((await status()).turbo.active, true);
+  setInt(60); W.poke(at(0x101300), Buffer.from([0]));
+  await sleep(1300);
   assert.equal(int(), 30);
   assert.equal(W.read(at(0x101300), 1)[0], 1);
-  assert.ok((await status()).turbo.reapplied >= 3);
+  assert.ok(logs.some((l) => l.includes('[TURBO] reaplicada(s)')));
 });
 
-test('pausado não é reaplicado; intervalo inválido vira 1 s', async () => {
+test('pausar para o turbo; retomar liga de novo', async () => {
   await post('/pause', { dumpVersion: V });
+  assert.equal((await status()).turbo.active, false);
   assert.equal(int(), 60);
-  await sleep(400);
-  assert.equal(int(), 60, 'pausa vence o turbo');
-  assert.equal((await post('/turbo', { enabled: true, intervalMs: 7 })).intervalMs, 1000);
+  await sleep(1300);
+  assert.equal(int(), 60, 'pausado não volta');
+  await post('/resume', { flags: FLAGS, dumpVersion: V });
+  assert.equal((await status()).turbo.active, true);
+  setInt(99);
+  await sleep(1300);
+  assert.equal(int(), 30);
+});
+
+test('flag desligada pelo atalho não é reaplicada', async () => {
+  await post('/toggle', { name: 'DFIntSimX', flags: FLAGS, dumpVersion: V });
+  assert.equal(int(), 60);
+  await sleep(1300);
+  assert.equal(int(), 60);
+  assert.equal(W.read(at(0x101300), 1)[0], 1, 'a outra continua aplicada');
 });

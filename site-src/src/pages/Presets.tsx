@@ -7,11 +7,10 @@ import { triggerLabel } from '../core/macros';
 import { type FlagType, type FlagValue, coerceValue, flagType } from '../core/flags';
 import { flagExists } from '../core/offsets/dataset';
 import { type Preset, exportPreset, findHotkey, parseImport, scanInvalidFlags } from '../core/presets';
-import { TURBO_INTERVALS } from '../core/storage/local';
 import { compatStatus } from '../state/status';
 import { type BuiltinGroup, hasFlag, store, useApp } from '../state/store';
 import {
-  Button, Card, Confirm, Empty, KeyBadge, KeyCapture, Modal, Notice, Switch, formatNumber,
+  Button, Card, Confirm, Empty, KeyBadge, KeyCapture, Modal, Notice, formatNumber,
 } from '../ui/components';
 import { InvalidFlagsDialog } from './InvalidFlagsDialog';
 
@@ -392,22 +391,15 @@ function ExportDialog({ preset, onClose }: { preset: Preset; onClose: () => void
 }
 
 function TurboRow() {
-  const turbo = useApp((s) => s.turbo);
-  const helper = useApp((s) => s.helper);
-  const old = !!helper && !helper.turbo;
+  const turbo = useApp((s) => s.helper?.turbo ?? null);
+  if (!turbo) return null;
   return (
-    <div className="row wrap" style={{ marginTop: 14, gap: 10 }}>
-      <Switch checked={turbo.enabled} onChange={(v) => void store.setTurbo(v)} label="Modo turbo" />
-      <span className="field-label" style={{ margin: 0 }}>Modo turbo</span>
-      <select className="select" style={{ width: 'auto' }} aria-label="Intervalo do turbo" value={turbo.intervalMs} onChange={(e) => void store.setTurbo(turbo.enabled, Number(e.target.value))}>
-        {TURBO_INTERVALS.map((ms) => <option key={ms} value={ms}>a cada {ms < 1000 ? `${ms} ms` : `${ms / 1000} s`}</option>)}
-      </select>
-      <span className="faint" style={{ fontSize: 12.5, flex: '1 1 240px' }}>
-        {old ? 'Atualize o Helper para usar o turbo.'
-          : turbo.enabled ? 'Ligado: se o Roblox desfizer alguma flag aplicada, o Helper aplica de novo sozinho. Pausar/desligar continua funcionando.'
-          : 'Desligado. Ligue para o Helper reaplicar sozinho as flags que o Roblox desfizer.'}
-      </span>
-    </div>
+    <p className="faint" style={{ margin: '12px 0 0', fontSize: 12.5 }}>
+      <strong>Turbo {turbo.active ? 'ativo' : 'parado'}</strong>
+      {turbo.active
+        ? ` — o Helper confere as flags aplicadas a cada 1 s e reaplica as que o Roblox desfizer${turbo.reapplied ? ` (${formatNumber(turbo.reapplied)} reaplicadas)` : ''}. Para ao pausar.`
+        : ' — liga sozinho ao aplicar ou retomar.'}
+    </p>
   );
 }
 

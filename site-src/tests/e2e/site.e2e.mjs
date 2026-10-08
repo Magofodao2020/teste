@@ -629,22 +629,12 @@ describe('presets e flags inválidas', () => {
     const apply = helper.state.posts.find((p) => p.path === '/apply');
     assert.deepEqual(apply.data, { flags: { DFIntTaskSchedulerTargetFps: '240', FFlagAbuseReport: 'true' }, dumpVersion: V_SITE });
 
-    // Modo turbo: começa desligado; ligar envia ao Helper e é lembrado.
-    const sw = page.getByRole('switch', { name: 'Modo turbo' });
-    assert.equal(await sw.getAttribute('aria-checked'), 'false');
-    assert.equal(helper.state.turbo.enabled, false);
-    await page.getByLabel('Intervalo do turbo').selectOption('500');
-    await sw.click();
-    await waitFor(() => helper.state.turbo.enabled === true && helper.state.turbo.intervalMs === 500);
-    // Helper reiniciado (volta desligado): o site reenvia a escolha.
-    helper.state.turbo = { enabled: false, intervalMs: 1000, reapplied: 0 };
-    helper.state.startedAt = Date.now();
-    await page.reload();
-    await page.waitForSelector('.topbar');
-    await waitFor(() => helper.state.turbo.enabled === true && helper.state.turbo.intervalMs === 500);
-    await page.goto(`${SITE}#/presets`);
-    await page.getByRole('switch', { name: 'Modo turbo' }).click();
-    await waitFor(() => helper.state.turbo.enabled === false);
+    // Turbo: sem opção de desligar; ligado junto com o aplicar.
+    assert.equal(await page.getByRole('switch', { name: /turbo/i }).count(), 0);
+    assert.ok(!helper.state.posts.some((p) => p.path === '/turbo'));
+    await page.getByText('Turbo ativo').waitFor();
+    await page.getByRole('button', { name: 'Pausar' }).click();
+    await page.getByText('Turbo parado').waitFor();
     await ctx.close();
   });
 
