@@ -41,6 +41,7 @@ export interface AppState {
 
 const POLL_VISIBLE_MS = 5_000;
 const POLL_HIDDEN_MS = 20_000;
+const RETRY_BEFORE_DISCONNECT_MS = 1_000;
 const OFFSETS_RETRY_MS = 30_000;
 const TOAST_MS = 4_500;
 
@@ -175,7 +176,13 @@ export class AppStore {
 
   /** Lê o status do Helper agora (também usado antes de cada operação). */
   async pollHelper(): Promise<HelperStatus | null> {
-    const probed = await this.helper.probe();
+    let probed = await this.helper.probe();
+    // Uma resposta perdida não é queda: com o Helper conectado, só marca como
+    // desconectado se falhar de novo logo em seguida.
+    if (!probed && this.state.helper) {
+      await new Promise((r) => setTimeout(r, RETRY_BEFORE_DISCONNECT_MS));
+      probed = await this.helper.probe();
+    }
     let st: HelperStatus | null = null;
     if (probed) {
       const { originals, ...rest } = probed;

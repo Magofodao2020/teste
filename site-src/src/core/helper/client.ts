@@ -5,6 +5,8 @@ import { type FlagOriginal, parseOriginals } from './originals';
 
 export const HELPER_PORTS = [7962, 7963, 7964, 7965, 7966];
 const PROBE_TIMEOUT_MS = 800;
+/** Porta onde o Helper já estava: espera mais (PC ocupado / jogo pesado não é queda). */
+const KNOWN_PORT_TIMEOUT_MS = 3000;
 const POST_TIMEOUT_MS = 8_000;
 const BIG_POST_TIMEOUT_MS = 20_000;
 
@@ -95,7 +97,7 @@ export class HelperClient {
     const order = this.port ? [this.port, ...HELPER_PORTS.filter((p) => p !== this.port)] : HELPER_PORTS;
     for (const port of order) {
       try {
-        const res = await this.request(`http://127.0.0.1:${port}/status`, { method: 'GET' }, PROBE_TIMEOUT_MS);
+        const res = await this.request(`http://127.0.0.1:${port}/status`, { method: 'GET' }, port === this.port ? KNOWN_PORT_TIMEOUT_MS : PROBE_TIMEOUT_MS);
         if (!res.ok) continue;
         const st = parseStatus(port, await res.json());
         if (!st) continue;
