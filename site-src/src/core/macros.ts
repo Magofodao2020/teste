@@ -22,6 +22,13 @@ export interface Macro {
   loopDelay: number;
   speed: number;
   robloxOnly: boolean;
+  /**
+   * Botão/tecla que ALTERNA o lado do flick (espelha o movimento horizontal dos
+   * passos de flick). null = sem alternância. O lado atual fica só no Helper.
+   */
+  sideKey: string | null;
+  /** Bipe ao trocar de lado (agudo = direita, grave = esquerda). */
+  sideSound: boolean;
   steps: MacroStep[];
   createdAt: number;
   updatedAt: number;
@@ -121,7 +128,7 @@ export function fromTemplate(t: Template, categoryId: string | null = null, id =
   const p = t.pack;
   return {
     id, name: p.name, categoryId, enabled: false, trigger: p.trigger, mode: p.mode, repeat: p.repeat,
-    loopDelay: p.loopDelay, speed: p.speed, robloxOnly: p.robloxOnly, steps: structuredClone(p.steps), createdAt: now, updatedAt: now,
+    loopDelay: p.loopDelay, speed: p.speed, robloxOnly: p.robloxOnly, sideKey: null, sideSound: true, steps: structuredClone(p.steps), createdAt: now, updatedAt: now,
   };
 }
 
@@ -244,6 +251,8 @@ export function sanitizeMacro(m: unknown, opts: { forceDisabled?: boolean; keepI
     loopDelay: pos(i.loopDelay, 0),
     speed: Math.min(50, Math.max(0.05, num(i.speed, 1))),
     robloxOnly: !!i.robloxOnly,
+    sideKey: isValidTrigger(i.sideKey) && i.sideKey !== i.trigger ? i.sideKey : null,
+    sideSound: i.sideSound !== false,
     steps,
     createdAt: num(i.createdAt, now) || now,
     updatedAt: num(i.updatedAt, now) || now,
@@ -256,6 +265,7 @@ export function macroProblems(m: Macro): string[] {
   if (!m.name.trim()) p.push('Dê um nome à ação.');
   if (!m.steps.length) p.push('Adicione pelo menos uma etapa.');
   if (!m.trigger) p.push('Defina o botão ou tecla que ativa a ação.');
+  if (m.sideKey && m.sideKey === m.trigger) p.push('O botão de alternar o lado tem que ser diferente do botão da ação.');
   return p;
 }
 
@@ -486,7 +496,7 @@ export function toHelperMacro(m: Macro) {
   return {
     id: m.id, name: m.name, enabled: m.enabled, trigger: m.trigger,
     mode: m.mode, repeat: m.repeat, loopDelay: m.loopDelay, speed: m.speed,
-    robloxOnly: m.robloxOnly, steps: structuredClone(m.steps),
+    robloxOnly: m.robloxOnly, sideKey: m.sideKey, sideSound: m.sideSound, steps: structuredClone(m.steps),
   };
 }
 
@@ -496,6 +506,7 @@ export function toExport(m: Macro, categoryName?: string | null) {
   return {
     bope: 'macro', v: 1, name: m.name, ...(categoryName ? { category: categoryName } : {}), mode: m.mode, repeat: m.repeat, loopDelay: m.loopDelay,
     speed: m.speed, robloxOnly: m.robloxOnly, steps: m.steps, ...(m.trigger ? { trigger: m.trigger } : {}),
+    ...(m.sideKey ? { sideKey: m.sideKey, sideSound: m.sideSound } : {}),
   };
 }
 

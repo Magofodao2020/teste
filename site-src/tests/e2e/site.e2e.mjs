@@ -392,6 +392,22 @@ describe('ações e macros', () => {
     await ctx.close();
   });
 
+  it('alternar lado do flick: botão próprio, enviado ao Helper', async () => {
+    const { page, ctx, errors } = await open({ [LIVE_URL]: { body: V_SITE } });
+    await page.goto(`${SITE}#/acoes`);
+    await row(page, 'Bug indi DIREITA').getByRole('button', { name: 'Editar' }).click();
+    const side = page.getByRole('button', { name: 'Botão que alterna o lado' });
+    await side.click(); await page.waitForTimeout(200); await page.keyboard.press('F9');
+    await waitFor(async () => (await side.textContent()).includes('F9'));
+    assert.equal(await page.getByRole('switch', { name: 'Bipe ao trocar o lado' }).getAttribute('aria-checked'), 'true');
+    await page.getByRole('button', { name: 'Salvar' }).click();
+    await waitFor(() => helper.state.macros?.find((m) => m.id === 'bug-indi-direita')?.sideKey === 'F9');
+    assert.equal(helper.state.macros.find((m) => m.id === 'bug-indi-direita').sideSound, true);
+    await row(page, 'Bug indi DIREITA').getByText('lado: F9').waitFor();
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
   it('definir botão pelo Helper (hook do Windows): lateral que o navegador não recebe, teclas, Esc e filtros', async () => {
     const { page, ctx, errors } = await open({ [LIVE_URL]: { body: V_SITE } });
     await page.goto(`${SITE}#/acoes`);

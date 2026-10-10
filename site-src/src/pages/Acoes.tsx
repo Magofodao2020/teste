@@ -23,7 +23,7 @@ type Dialog =
 
 function blankMacro(steps: MacroStep[] = [], name = 'Nova ação', categoryId: string | null = null): Macro {
   const now = Date.now();
-  return { id: newMacroId(), name, categoryId, enabled: false, trigger: null, mode: 'once', repeat: 1, loopDelay: 0, speed: 1, robloxOnly: true, steps, createdAt: now, updatedAt: now };
+  return { id: newMacroId(), name, categoryId, enabled: false, trigger: null, mode: 'once', repeat: 1, loopDelay: 0, speed: 1, robloxOnly: true, sideKey: null, sideSound: true, steps, createdAt: now, updatedAt: now };
 }
 
 const safe = (s: string) => s.replace(/[/\\]+/g, '-');
@@ -254,7 +254,7 @@ function MacroRow({ m, categories, conflicts, helperOn, isFirst, isLast, onEdit,
         <div className="col" style={{ gap: 2, minWidth: 0, flex: '1 1 180px' }}>
           <strong className="macro-name">{m.name}</strong>
           <span className="faint truncate" style={{ fontSize: 12 }} title={m.steps.map(describeStep).join('\n')}>
-            {mode}{m.mode === 'once' && m.repeat > 1 ? ` ×${m.repeat}` : ''} · {m.steps.length} {m.steps.length === 1 ? 'etapa' : 'etapas'} · ~{macroMs(m)} ms{m.robloxOnly ? ' · só no Roblox' : ''}
+            {mode}{m.mode === 'once' && m.repeat > 1 ? ` ×${m.repeat}` : ''} · {m.steps.length} {m.steps.length === 1 ? 'etapa' : 'etapas'} · ~{macroMs(m)} ms{m.robloxOnly ? ' · só no Roblox' : ''}{m.sideKey ? ` · lado: ${triggerLabel(m.sideKey)}` : ''}
           </span>
         </div>
         <KeyCapture value={m.trigger} onChange={(c) => store.setMacroTrigger(m.id, c)} label={`Botão de ${m.name}`} />
