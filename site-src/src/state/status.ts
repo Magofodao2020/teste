@@ -13,7 +13,7 @@ export function helperStatus(helper: HelperStatus | null, checked: boolean): Sta
     return { tone: 'err', label: 'Helper desconectado', detail: 'Abra o help.bat (node 626.js) e deixe a janela aberta. Sem ele, as ações e a aplicação no Roblox não funcionam.' };
   }
   if (helper.platform !== 'win32' || !helper.ffiReady) {
-    return { tone: 'warn', label: 'Helper sem acesso ao Windows', detail: 'O Helper está aberto, mas só funciona no Windows com as dependências instaladas (npm install).' };
+    return { tone: 'warn', label: 'Helper sem acesso ao Windows', detail: 'O Helper está aberto, mas só funciona no Windows com a pasta "dp" (que vem no zip) ao lado do 626.js.' };
   }
   return { tone: 'ok', label: 'Helper conectado', detail: `Helper ${helper.helperVersion} na porta ${helper.port}.` };
 }
