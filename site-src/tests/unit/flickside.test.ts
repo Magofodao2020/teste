@@ -22,4 +22,9 @@ describe('alternar lado do flick', () => {
     expect(sanitizeMacro({ ...base, sideKey: 'MouseBack' })!.sideKey).toBeNull();
     expect(macroProblems({ ...m, sideKey: 'MouseBack' })).toContain('O botão de alternar o lado tem que ser diferente do botão da ação.');
   });
+
+  it('flick só para baixo (Bug Indi) não tem alternar lado', () => {
+    const down = { ...base, sideKey: 'MouseForward', steps: [{ t: 'flick', btn: 'left', dx: 0, dy: 20001 }] };
+    expect(sanitizeMacro(down)!.sideKey).toBeNull();
+  });
 });

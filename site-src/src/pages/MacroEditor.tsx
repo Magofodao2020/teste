@@ -4,7 +4,7 @@ import {
 import { type ReactNode, useMemo, useState } from 'react';
 import {
   MODES, MOUSE_BUTTONS, type Macro, type MacroMode, type MacroStep, STEP_LABEL, STEP_TYPES, type StepType,
-  defaultStep, describeStep, macroMs, macroProblems, moveItem, sanitizeMacro, sanitizeStep,
+  defaultStep, describeStep, hasSideFlick, macroMs, macroProblems, moveItem, sanitizeMacro, sanitizeStep,
 } from '../core/macros';
 import { store, useApp } from '../state/store';
 import { Button, Card, Confirm, KeyCapture, Notice, Switch } from '../ui/components';
@@ -26,8 +26,7 @@ export function MacroEditor({ initial, isNew, onClose }: { initial: Macro; isNew
   const saveProblems = problems.filter((p) => !p.startsWith('Defina o botão')); // sem botão pode salvar (fica desativada)
 
   const patch = (p: Partial<Macro>) => setM((cur) => ({ ...cur, ...p }));
-  const hasFlick = m.steps.some((s) => s.t === 'flick');
-  const flickHasDx = m.steps.some((s) => s.t === 'flick' && Number(s.dx) !== 0);
+  const flickHasDx = hasSideFlick(m.steps);
   const setStep = (i: number, s: MacroStep) => setM((cur) => ({ ...cur, steps: cur.steps.map((x, k) => (k === i ? s : x)) }));
   const move = (from: number, to: number) => setM((cur) => ({ ...cur, steps: moveItem(cur.steps, from, to) }));
 
@@ -96,7 +95,7 @@ export function MacroEditor({ initial, isNew, onClose }: { initial: Macro; isNew
             <span className="field-label">Só com o Roblox em foco</span>
             <div className="row"><Switch checked={m.robloxOnly} onChange={(v) => patch({ robloxOnly: v })} label="Só com o Roblox em foco" /><span className="faint" style={{ fontSize: 12.5 }}>{m.robloxOnly ? 'Não dispara se outra janela estiver na frente.' : 'Dispara em qualquer janela.'}</span></div>
           </div>
-          {(hasFlick || m.sideKey) && (
+          {flickHasDx && (
             <div className="col">
               <span className="field-label">Botão que alterna o lado do flick</span>
               <div className="row">
@@ -105,14 +104,13 @@ export function MacroEditor({ initial, isNew, onClose }: { initial: Macro; isNew
               </div>
               {m.sideKey && m.sideKey === m.trigger
                 ? <span role="alert" style={{ fontSize: 12, color: 'var(--danger, #e5484d)' }}>Use um botão diferente do botão da ação.</span>
-                : <span className="faint" style={{ fontSize: 12 }}>{m.sideKey ? 'Cada toque troca o lado do flick (esquerda ⇄ direita). Começa no lado configurado nas etapas.' : 'Opcional: um botão para trocar o lado do flick sem mudar as etapas.'}</span>}
+                : <span className="faint" style={{ fontSize: 12 }}>{m.sideKey ? 'Cada toque troca o flick entre esquerda e direita. Começa no lado configurado nas etapas.' : 'Opcional: um botão para trocar o flick entre esquerda e direita.'}</span>}
               {m.sideKey && (
                 <div className="row" style={{ marginTop: 6 }}>
                   <Switch checked={m.sideSound} onChange={(v) => patch({ sideSound: v })} label="Bipe ao trocar o lado" />
                   <span className="faint" style={{ fontSize: 12.5 }}>{m.sideSound ? 'Bipe agudo = direita, grave = esquerda.' : 'Sem som ao trocar.'}</span>
                 </div>
               )}
-              {m.sideKey && !flickHasDx && <span className="faint" style={{ fontSize: 12, color: 'var(--warn, #d4a017)' }}>As etapas de flick estão com movimento horizontal 0 — defina um valor no X para o lado fazer diferença.</span>}
             </div>
           )}
         </div>

@@ -404,6 +404,10 @@ describe('ações e macros', () => {
     await waitFor(() => helper.state.macros?.find((m) => m.id === 'bug-indi-direita')?.sideKey === 'F9');
     assert.equal(helper.state.macros.find((m) => m.id === 'bug-indi-direita').sideSound, true);
     await row(page, 'Bug indi DIREITA').getByText('lado: F9').waitFor();
+    // Bug Indi (só para baixo): sem opção de alternar lado
+    await row(page, 'Bug Indi').getByRole('button', { name: 'Editar' }).click();
+    await page.getByLabel('Nome da ação').waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Botão que alterna o lado' }).count(), 0);
     assert.deepEqual(errors, []);
     await ctx.close();
   });

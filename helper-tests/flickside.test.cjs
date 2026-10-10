@@ -28,6 +28,11 @@ test('mesmo botão para ação e lado é recusado', () => {
   assert.equal(sanitizeMacro({ ...macro, sideKey: 'MouseBack' }).sideKey, null);
 });
 
+test('flick só para baixo (Bug Indi) não tem alternar lado', () => {
+  const down = { ...macro, steps: [{ ...macro.steps[0], dx: 0, dy: 20001 }] };
+  assert.equal(sanitizeMacro(down).sideKey, null);
+});
+
 test('flick no lado configurado; trocar o lado espelha o X e bipa', async () => {
   sys.setConfig({ macros: [macro] });
   assert.equal(sys.state().sides.bug, 'DIREITA');

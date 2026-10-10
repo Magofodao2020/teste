@@ -234,6 +234,11 @@ export function defaultStep(t: StepType): MacroStep {
   )!;
 }
 
+/** Tem flick com movimento para a esquerda/direita (o único que dá para alternar o lado). */
+export function hasSideFlick(steps: MacroStep[]): boolean {
+  return steps.some((s) => s.t === 'flick' && Number(s.dx) !== 0);
+}
+
 /** Normaliza uma macro vinda do armazenamento, de importação ou do editor. */
 export function sanitizeMacro(m: unknown, opts: { forceDisabled?: boolean; keepId?: boolean } = {}): Macro | null {
   if (!m || typeof m !== 'object') return null;
@@ -251,7 +256,8 @@ export function sanitizeMacro(m: unknown, opts: { forceDisabled?: boolean; keepI
     loopDelay: pos(i.loopDelay, 0),
     speed: Math.min(50, Math.max(0.05, num(i.speed, 1))),
     robloxOnly: !!i.robloxOnly,
-    sideKey: isValidTrigger(i.sideKey) && i.sideKey !== i.trigger ? i.sideKey : null,
+    // Só para flick que vai para a esquerda/direita (X ≠ 0); flick só para baixo não alterna.
+    sideKey: isValidTrigger(i.sideKey) && i.sideKey !== i.trigger && hasSideFlick(steps) ? i.sideKey : null,
     sideSound: i.sideSound !== false,
     steps,
     createdAt: num(i.createdAt, now) || now,
