@@ -1,23 +1,25 @@
 import {
-  Crosshair, Layers, LayoutDashboard, Library, PanelLeftClose, PanelLeftOpen, Settings,
+  Crosshair, Gauge, Layers, LayoutDashboard, Library, PanelLeftClose, PanelLeftOpen, Settings,
 } from 'lucide-react';
 import { type ComponentType, useEffect, useMemo, useState } from 'react';
 import { scanInvalidFlags } from './core/presets';
 import { AcoesPage } from './pages/Acoes';
 import { CatalogoPage } from './pages/Catalogo';
 import { ConfigPage } from './pages/Configuracoes';
+import { DiagnosticoPage } from './pages/Diagnostico';
 import { PainelPage } from './pages/Painel';
 import { PresetsPage } from './pages/Presets';
 import { compatStatus, helperStatus, offsetStatus, robloxStatus } from './state/status';
 import { store, useApp } from './state/store';
 import { Chip, Logo, Toasts, shortVersion } from './ui/components';
 
-export type Route = 'painel' | 'acoes' | 'presets' | 'catalogo' | 'config';
+export type Route = 'painel' | 'acoes' | 'diagnostico' | 'presets' | 'catalogo' | 'config';
 
 interface NavEntry { id: Route; label: string; subtitle: string; icon: ComponentType; section?: string }
 const NAV: NavEntry[] = [
   { id: 'painel', label: 'Painel', subtitle: 'Visão geral: Helper, Roblox, offsets, ações e presets', icon: LayoutDashboard },
   { id: 'acoes', label: 'Ações', subtitle: 'Crie, grave, edite e ative suas ações e macros', icon: Crosshair, section: 'Operação' },
+  { id: 'diagnostico', label: 'Diagnóstico', subtitle: 'Execuções, histórico e latência medida no executor', icon: Gauge },
   { id: 'presets', label: 'Presets', subtitle: 'Flags salvas e aplicação no Roblox', icon: Layers },
   { id: 'catalogo', label: 'Catálogo de flags', subtitle: 'Todas as flags do dump atual', icon: Library },
   { id: 'config', label: 'Configurações', subtitle: 'Helper, offsets e dados do site', icon: Settings, section: 'Sistema' },
@@ -58,6 +60,8 @@ export function App() {
   const collapsed = useApp((s) => s.sidebarCollapsed);
   const [route, setRoute] = useState<Route>(readRoute);
   useSideButtonGuard();
+  // trocar de página começa do topo (a área de conteúdo rola sozinha)
+  useEffect(() => { document.querySelector('.content')?.scrollTo({ top: 0 }); }, [route]);
   useEffect(() => {
     const onHash = () => setRoute(readRoute());
     window.addEventListener('hashchange', onHash);
@@ -140,6 +144,7 @@ export function App() {
         <main className="content">
           {route === 'painel' && <PainelPage invalidCount={invalid} />}
           {route === 'acoes' && <AcoesPage />}
+          {route === 'diagnostico' && <DiagnosticoPage />}
           {route === 'presets' && <PresetsPage />}
           {route === 'catalogo' && <CatalogoPage />}
           {route === 'config' && <ConfigPage />}

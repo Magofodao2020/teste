@@ -3,10 +3,13 @@
 
 import { useSyncExternalStore } from 'react';
 import {
-  type Macro, type MacrosState, type ImportedPack, TEMPLATES, addCategory, applyImport, defaultMacrosState, duplicateMacro,
-  fromTemplate, moveCategory, newMacroId, removeCategory, removeMacro, renameCategory, reorderMacro, restoreMacrosState,
-  setAllEnabled, setCategoryEnabled, setMacroCategory, setEnabled, toHelperMacro, upsertMacro,
+  type BatchPatch, type CategoryRemoval, type Macro, type MacrosState, type ImportedPack, type TimingPreset, TEMPLATES, addCategory,
+  applyImport, applyTiming, defaultMacrosState, duplicateCategory, duplicateMacro, duplicateMany, fromTemplate, moveCategory,
+  moveCategoryTo, moveMacroTo, moveMany, newMacroId, patchMany, removeCategory, removeMacro, removeMany, removeTimingPreset,
+  renameCategory, reorderMacro, restoreDefaults, restoreMacrosState, savePresetFromMacro, setAllEnabled, setCategoryEnabled,
+  setEnabled, setMacroCategory, setManyEnabled, toHelperMacro, upsertMacro, upsertTimingPreset,
 } from '../core/macros';
+import { type HistoryEntry, type MacroLive, mergeHistory } from '../core/helper/live';
 import { type FlagValue, cleanFlagName, toHelperValue } from '../core/flags';
 import { HelperClient, type HelperResult, type HelperStatus } from '../core/helper/client';
 import { OriginalsMemory } from '../core/helper/originals';
@@ -37,6 +40,10 @@ export interface AppState {
   sidebarCollapsed: boolean;
   toasts: Toast[];
   busy: Partial<Record<'apply' | 'pause' | 'resume', boolean>>;
+  /** Estado ao vivo do executor (só enquanto alguma tela que mostra execução está aberta). */
+  live: MacroLive | null;
+  /** Histórico recebido do Helper (memória da aba). */
+  history: HistoryEntry[];
 }
 
 const POLL_VISIBLE_MS = 5_000;
@@ -44,6 +51,8 @@ const POLL_HIDDEN_MS = 20_000;
 const RETRY_BEFORE_DISCONNECT_MS = 1_000;
 const OFFSETS_RETRY_MS = 30_000;
 const TOAST_MS = 4_500;
+/** Ritmo da leitura do estado ao vivo — só com uma tela de execução aberta e a aba visível. */
+const LIVE_MS = 400;
 
 export class AppStore {
   private state: AppState;
@@ -70,7 +79,7 @@ export class AppStore {
       offsets: { status: 'loading', liveVersion: null, liveCheckedAt: null, dataset: null, source: null, lastSyncAt: null, error: null, diagnostic: null },
       index: null, helper: null, helperChecked: false,
       presets: [], activePresetId: prefs.activePresetId, hotkeys: {}, macros: defaultMacrosState(),
-      sidebarCollapsed: prefs.sidebarCollapsed, toasts: [], busy: {},
+      sidebarCollapsed: prefs.sidebarCollapsed, toasts: [], busy: {}, live: null, history: [],
     };
   }
 
@@ -236,7 +245,7 @@ export class AppStore {
   private async pushMacros() {
     if (!this.state.helper) return;
     const a = this.state.macros;
-    await this.helper.setMacros(a.macros.map(toHelperMacro), { stopKey: a.stopKey });
+    await this.helper.setMacros(a.macros.map(toHelperMacro), { stopKey: a.stopKey, history: a.history });
   }
 
   private async pushHotkeys() {
@@ -291,6 +300,66 @@ export class AppStore {
   async stopActions() {
     const r = await this.helper.stopMacros();
     this.toast(r.ok ? 'info' : 'error', r.message);
+  }
+
+  // ───────── execução ao vivo (leitura) ─────────
+  // A execução acontece SÓ no Helper. O site lê o estado num ritmo leve e apenas
+  // enquanto há uma tela que mostra execução (Ações, Diagnóstico, Painel).
+
+  private liveUsers = 0;
+  private liveTimer: ReturnType<typeof setTimeout> | null = null;
+  private liveBusy = false;
+
+  /** Uma tela que mostra execução abriu; devolve a função para quando ela fechar. */
+  watchLive(): () => void {
+    this.liveUsers++;
+    if (this.liveUsers === 1) this.scheduleLive(0);
+    return () => {
+      this.liveUsers = Math.max(0, this.liveUsers - 1);
+      if (!this.liveUsers && this.liveTimer) { clearTimeout(this.liveTimer); this.liveTimer = null; }
+    };
+  }
+
+  private scheduleLive(ms: number) {
+    if (this.liveTimer) clearTimeout(this.liveTimer);
+    this.liveTimer = setTimeout(() => void this.pollLive(), ms);
+  }
+
+  private async pollLive() {
+    this.liveTimer = null;
+    if (!this.liveUsers || this.disposed) return;
+    const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    if (!hidden && this.state.helper && !this.liveBusy) {
+      this.liveBusy = true;
+      try {
+        const live = await this.helper.macroState();
+        if (JSON.stringify(live) !== JSON.stringify(this.state.live)) this.set({ live });
+        const lastSeq = this.state.history.length ? this.state.history[this.state.history.length - 1].seq : 0;
+        if (live && live.historySeq !== lastSeq) {
+          const since = live.historySeq < lastSeq ? 0 : lastSeq; // Helper reiniciou
+          const h = await this.helper.macroHistory(since);
+          if (h) this.set({ history: since === 0 && lastSeq ? h.items : mergeHistory(this.state.history, h.items) });
+        }
+      } finally {
+        this.liveBusy = false;
+      }
+    } else if (!this.state.helper && this.state.live) {
+      this.set({ live: null });
+    }
+    if (this.liveUsers) this.scheduleLive(hidden ? 2000 : LIVE_MS);
+  }
+
+  async clearHistory() {
+    const r = await this.helper.clearMacroHistory();
+    if (r.ok) this.set({ history: [] });
+    else this.toast('error', r.message);
+  }
+
+  setHistoryEnabled(on: boolean) { this.saveMacros({ ...this.state.macros, history: on }); }
+
+  async stopMacro(id: string) {
+    const r = await this.helper.stopMacros(id);
+    if (!r.ok) this.toast('error', r.message);
   }
 
   // ───────── presets ─────────
@@ -468,14 +537,65 @@ export class AppStore {
     if (!name.trim()) return;
     this.saveMacros(renameCategory(this.state.macros, id, name));
   }
-  /** Exclui a categoria; as ações dentro dela ficam sem categoria (não são apagadas). */
-  removeCategory(id: string) {
-    const cat = this.state.macros.categories.find((c) => c.id === id);
-    const count = this.state.macros.macros.filter((m) => m.categoryId === id).length;
-    this.saveMacros(removeCategory(this.state.macros, id));
-    this.toast('success', count
-      ? `Categoria "${cat?.name ?? ''}" excluída · ${count} ${count === 1 ? 'ação ficou sem categoria' : 'ações ficaram sem categoria'}.`
-      : `Categoria "${cat?.name ?? ''}" excluída.`);
+  /** Exclui a categoria; o usuário escolhe o destino das ações (padrão: ficam sem categoria). */
+  removeCategory(id: string, what: CategoryRemoval = 'uncat') {
+    const st = this.state.macros;
+    const cat = st.categories.find((c) => c.id === id);
+    const count = st.macros.filter((m) => m.categoryId === id).length;
+    this.saveMacros(removeCategory(st, id, what));
+    const dest = typeof what === 'object' ? st.categories.find((c) => c.id === what.moveTo)?.name : null;
+    const n = `${count} ${count === 1 ? 'ação' : 'ações'}`;
+    this.toast('success', !count ? `Categoria "${cat?.name ?? ''}" excluída.`
+      : what === 'delete' ? `Categoria "${cat?.name ?? ''}" excluída com ${n}.`
+        : dest ? `Categoria "${cat?.name ?? ''}" excluída · ${n} movida(s) para "${dest}".`
+          : `Categoria "${cat?.name ?? ''}" excluída · ${n} sem categoria.`);
+  }
+  duplicateCategory(id: string) {
+    const r = duplicateCategory(this.state.macros, id);
+    if (!r.id) return;
+    this.saveMacros(r.state);
+    this.toast('success', `Categoria "${r.state.categories.find((c) => c.id === r.id)?.name}" criada · cópias desativadas.`);
+  }
+  moveMacroTo(id: string, categoryId: string | null, beforeId: string | null) { this.saveMacros(moveMacroTo(this.state.macros, id, categoryId, beforeId)); }
+  moveCategoryTo(id: string, beforeId: string | null) { this.saveMacros(moveCategoryTo(this.state.macros, id, beforeId)); }
+
+  // ───── edição em lote ─────
+  setManyEnabled(ids: string[], enabled: boolean) {
+    const next = setManyEnabled(this.state.macros, ids, enabled);
+    this.saveMacros(next);
+    if (enabled) {
+      const skipped = next.macros.filter((m) => ids.includes(m.id) && !m.enabled).length;
+      if (skipped) this.toast('info', `${skipped} sem botão ou sem etapas não ${skipped === 1 ? 'foi ativada' : 'foram ativadas'}.`);
+    }
+  }
+  moveMany(ids: string[], categoryId: string | null) { this.saveMacros(moveMany(this.state.macros, ids, categoryId)); this.toast('success', `${ids.length} ${ids.length === 1 ? 'ação movida' : 'ações movidas'}.`); }
+  removeMany(ids: string[]) { this.saveMacros(removeMany(this.state.macros, ids)); this.toast('success', `${ids.length} ${ids.length === 1 ? 'ação excluída' : 'ações excluídas'}.`); }
+  duplicateMany(ids: string[]) { this.saveMacros(duplicateMany(this.state.macros, ids)); this.toast('success', `${ids.length} ${ids.length === 1 ? 'cópia criada' : 'cópias criadas'} · desativadas.`); }
+  patchMany(ids: string[], patch: BatchPatch) { this.saveMacros(patchMany(this.state.macros, ids, patch)); this.toast('success', `${ids.length} ${ids.length === 1 ? 'ação alterada' : 'ações alteradas'}.`); }
+
+  // ───── presets de temporização ─────
+  applyTimingPreset(ids: string[], presetId: string) {
+    const p = this.state.macros.timingPresets.find((x) => x.id === presetId);
+    if (!p) return;
+    const set = new Set(ids);
+    this.saveMacros({ ...this.state.macros, macros: this.state.macros.macros.map((m) => (set.has(m.id) ? applyTiming(m, p.values) : m)) });
+    this.toast('success', `Preset "${p.name}" aplicado em ${ids.length} ${ids.length === 1 ? 'ação' : 'ações'}.`);
+  }
+  saveTimingPreset(p: TimingPreset) { this.saveMacros(upsertTimingPreset(this.state.macros, p)); }
+  presetFromMacro(name: string, m: Macro) {
+    const r = savePresetFromMacro(this.state.macros, name, m);
+    this.saveMacros(r.state);
+    this.toast('success', `Preset "${r.state.timingPresets.find((x) => x.id === r.id)?.name}" salvo.`);
+    return r.id;
+  }
+  removeTimingPreset(id: string) { this.saveMacros(removeTimingPreset(this.state.macros, id)); }
+
+  /** Volta a ação ao modelo (ou a temporização/comportamento aos padrões). */
+  restoreMacroDefaults(id: string) {
+    const m = this.state.macros.macros.find((x) => x.id === id);
+    if (!m) return;
+    this.saveMacros(upsertMacro(this.state.macros, restoreDefaults(m)));
+    this.toast('success', m.templateId ? `"${m.name}" voltou ao modelo original.` : `Temporização e comportamento de "${m.name}" voltaram ao padrão.`);
   }
   moveCategory(id: string, dir: -1 | 1) {
     this.saveMacros(moveCategory(this.state.macros, id, dir));
@@ -508,6 +628,7 @@ export class AppStore {
     this.saveMacros(r.state);
     const parts = [`${r.addedMacros} ${r.addedMacros === 1 ? 'ação importada' : 'ações importadas'} · desativadas`];
     if (r.addedCategories) parts.push(`${r.addedCategories} ${r.addedCategories === 1 ? 'categoria criada' : 'categorias criadas'}`);
+    if (r.addedPresets) parts.push(`${r.addedPresets} ${r.addedPresets === 1 ? 'preset de tempo' : 'presets de tempo'}`);
     this.toast('success', parts.join(' · ') + '.');
   }
   setStopKey(code: string) { this.saveMacros({ ...this.state.macros, stopKey: code }); }

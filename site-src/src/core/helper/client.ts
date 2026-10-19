@@ -1,6 +1,7 @@
 // Cliente do Helper local (Node.js em 127.0.0.1). Só conversa com a máquina do
 // usuário; o Helper não tem internet e só usa o que o site envia.
 
+import { type HistoryEntry, type MacroLive, parseHistory, parseLive } from './live';
 import { type FlagOriginal, parseOriginals } from './originals';
 
 export const HELPER_PORTS = [7962, 7963, 7964, 7965, 7966];
@@ -150,7 +151,29 @@ export class HelperClient {
       return null;
     }
   }
-  stopMacros() { return this.post('/macro/stop', {}); }
+  stopMacros(id?: string) { return this.post('/macro/stop', id ? { id } : {}); }
+  clearMacroHistory() { return this.post('/macro/history/clear', {}); }
+
+  /** Estado ao vivo do executor (rodando, fila, Gagatech direta). */
+  async macroState(): Promise<MacroLive | null> {
+    if (!this.port) return null;
+    try {
+      const res = await this.request(`http://127.0.0.1:${this.port}/macro/state`, { method: 'GET' }, PROBE_TIMEOUT_MS);
+      return parseLive(await res.json());
+    } catch {
+      return null;
+    }
+  }
+  /** Histórico incremental (só o que veio depois de `since`). */
+  async macroHistory(since: number): Promise<{ seq: number; items: HistoryEntry[] } | null> {
+    if (!this.port) return null;
+    try {
+      const res = await this.request(`http://127.0.0.1:${this.port}/macro/history?since=${since}`, { method: 'GET' }, PROBE_TIMEOUT_MS);
+      return parseHistory(await res.json());
+    } catch {
+      return null;
+    }
+  }
 
   /** "Definir botão" pelo hook do Windows (qualquer navegador, inclusive laterais). */
   captureStart(opts: { mouse: boolean; scroll: boolean; keyboard: boolean }) { return this.post('/capture/start', opts, PROBE_TIMEOUT_MS * 2); }

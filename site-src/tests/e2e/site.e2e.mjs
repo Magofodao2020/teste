@@ -539,6 +539,70 @@ describe('ações e macros', () => {
     await ctx.close();
   });
 
+  it('reformulação: pesquisa, lote, delays por ação/etapa, preset de tempo, excluir categoria movendo e diagnóstico', async () => {
+    const { page, ctx, errors } = await open({ [LIVE_URL]: { body: V_SITE } });
+    await page.goto(`${SITE}#/acoes`);
+    await waitFor(() => helper.state.macros);
+    // pesquisa
+    await page.getByLabel('Pesquisar ações').fill('bug indi');
+    await waitFor(async () => (await page.locator('.macro-name').count()) === 3);
+    await page.getByLabel('Pesquisar ações').fill('');
+    // seleção múltipla + ativar em lote
+    await row(page, 'Perfect Dive').getByLabel('Selecionar Perfect Dive').check();
+    await row(page, 'Gagatech').getByLabel('Selecionar Gagatech').check();
+    await page.getByRole('toolbar', { name: 'Ações selecionadas' }).getByRole('button', { name: 'Ativar', exact: true }).click();
+    await waitFor(() => enabledIds().join() === 'gagatech,perfect-dive');
+    // edição em lote: delay entre etapas = 25 nas duas
+    await page.getByRole('button', { name: 'Editar em lote' }).click();
+    await page.getByLabel('Lote: Delay entre etapas').fill('25');
+    await page.getByRole('dialog').getByRole('button', { name: /Aplicar/ }).click();
+    await waitFor(() => ['gagatech', 'perfect-dive'].every((id) => helper.state.macros.find((m) => m.id === id).stepGap === 25));
+    assert.equal(helper.state.macros.find((m) => m.id === 'bug-indi').stepGap, 0, 'só as selecionadas');
+    await page.getByRole('button', { name: 'Limpar seleção' }).click();
+
+    // editor: delay inicial, depois da etapa, etapa desativada, combinação e parada da ação
+    await row(page, 'Perfect Dive').getByRole('button', { name: 'Editar' }).click();
+    await page.getByLabel('Delay inicial', { exact: true }).fill('12');
+    await page.getByLabel('Esperar depois da etapa 1').fill('7');
+    await page.getByRole('button', { name: 'Desativar etapa 2' }).click();
+    await page.getByLabel('Exigir Shift').check();
+    await page.getByRole('button', { name: 'Tecla de parada da ação' }).click(); await page.waitForTimeout(200); await page.keyboard.press('F10');
+    await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+    await waitFor(() => helper.state.macros.find((m) => m.id === 'perfect-dive')?.startDelay === 12);
+    const pd = helper.state.macros.find((m) => m.id === 'perfect-dive');
+    assert.equal(pd.steps[0].after, 7);
+    assert.equal(pd.steps[1].off, true);
+    assert.deepEqual(pd.mods, ['shift']);
+    assert.equal(pd.stopKey, 'F10');
+
+    // preset de tempo aplicado na seleção
+    await row(page, 'Bug Indi').getByLabel('Selecionar Bug Indi').check();
+    await page.getByLabel('Aplicar preset de tempo nas selecionadas').selectOption({ label: 'Espaçado (30 ms entre etapas)' });
+    await waitFor(() => helper.state.macros.find((m) => m.id === 'bug-indi').stepGap === 30);
+    await page.getByRole('button', { name: 'Limpar seleção' }).click();
+
+    // excluir categoria escolhendo mover as ações para outra
+    const cat = (name) => page.locator('.cat-group', { has: page.locator('.cat-name', { hasText: new RegExp(`^${name}$`) }) });
+    await cat('GK').getByRole('button', { name: 'Excluir categoria GK' }).click();
+    await page.getByRole('dialog').getByLabel('Categoria de destino').selectOption({ label: 'Bug Indi' });
+    await page.getByRole('button', { name: 'Excluir categoria', exact: true }).click();
+    await waitFor(async () => (await cat('Bug Indi').locator('.macro-row').count()) === 5);
+    assert.equal((helper.state.macros ?? []).length, 5, 'nenhuma ação apagada');
+
+    // diagnóstico: histórico e latência vindos do Helper
+    helper.state.history = [
+      { seq: 1, id: 'perfect-dive', name: 'Perfect Dive', at: Date.now(), result: 'concluída', error: null, iterations: 1, ms: 80, latency: 0.6, steps: 2, planned: 80, lateMax: 0.3, lateAvg: 0.1, stalls: 0 },
+      { seq: 2, id: 'gagatech', name: 'Gagatech', at: Date.now(), result: 'direto', error: null, iterations: 1, ms: 0, latency: 0, steps: 1, planned: 0, lateMax: null, lateAvg: null, stalls: 0 },
+    ];
+    await page.getByRole('link', { name: 'Diagnóstico', exact: true }).click();
+    await page.locator('table').first().getByText('Perfect Dive').waitFor();
+    await page.getByText('0.6 ms').first().waitFor();
+    await page.getByRole('button', { name: 'Limpar' }).click();
+    await waitFor(() => helper.state.history.length === 0);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
   it('Helper reiniciado recebe offsets, ações e atalhos de novo', async () => {
     const { ctx } = await open({ [LIVE_URL]: { body: V_SITE } });
     await waitFor(() => helper.state.offsets && helper.state.macros);

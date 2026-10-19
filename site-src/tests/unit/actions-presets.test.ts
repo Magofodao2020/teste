@@ -213,7 +213,7 @@ describe('ações e macros', () => {
       { id: 'c', name: 'C', trigger: 'KeyC', steps: [{ t: 'key', code: 'KeyE' }] },
     ] };
     const st = restoreMacrosState(v3);
-    expect(st.v).toBe(4);
+    expect(st.v).toBe(5);
     expect(st.categories.map((c) => c.name)).toEqual(['Movimento', 'Combate']);
     const name = idToName(st);
     expect(st.macros.map((m) => [m.name, name(m.categoryId)])).toEqual([['A', 'Movimento'], ['B', 'Combate'], ['C', null]]);

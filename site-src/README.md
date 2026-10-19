@@ -23,15 +23,31 @@ src/
     offsets/service.ts  ÚNICO ponto que busca versão LIVE/offsets na internet (com cache e fallback)
     offsets/remote.ts   fetch com diagnóstico (CORS × rede × HTTP × formato) e proxy do site
     helper/client.ts    cliente do Helper local (127.0.0.1:7962–7966)
-    macros.ts           ações/macros (modelos, sanitização igual ao Helper, import/export)
+    helper/live.ts      estado ao vivo do executor + histórico/latência (só leitura)
+    macros.ts           ações/macros v5 (modelos, sanitização igual ao Helper, presets de
+                        tempo, validação, lote, import/export, migração v1–v4 → v5)
     presets.ts          presets, importação/exportação, limpeza de flags inexistentes
     storage/            IndexedDB do site (presets) e localStorage (preferências)
   state/
     store.ts            estado central + sincronização com o Helper (fila serializada)
     status.ts           textos de status em pt-BR (funções puras)
-  pages/                Painel, Ações (+ editor/gravador), Presets, Catálogo, Configurações
+  pages/                Painel, Ações (+ editor/gravador), Diagnóstico, Presets, Catálogo, Configurações
   ui/                   componentes, tema BOPE, logo e fontes (locais, sem CDN)
 ```
+
+### Ações (v5)
+
+O site **só configura e mostra**: quem dispara, temporiza, interrompe e solta as
+teclas é o executor do Helper (521/592). Cada ação tem descrição, combinação
+(Ctrl/Shift/Alt), tecla de parada própria, delays inicial / entre etapas / entre
+repetições / final, esperar antes e depois de cada etapa, etapas desativáveis,
+"apertar de novo" (parar/reiniciar/ignorar), trava anti-repetição e grupo exclusivo
+com prioridade (interromper/bloquear/fila). Presets de tempo só são aplicados quando o
+usuário pede. A lista tem pesquisa, filtros, ordenação, seleção múltipla com edição em
+lote, arrastar e soltar (ações e categorias) e validação com "como corrigir". A página
+Diagnóstico lê o estado ao vivo e o histórico do Helper (latência gatilho → 1ª entrada,
+duração real × planejada, atraso das esperas) — a leitura só roda com a tela aberta.
+O estado salvo v4 é migrado sozinho para v5 sem perder nada.
 
 ### Versão e offsets (automáticos)
 

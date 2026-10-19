@@ -63,7 +63,7 @@ test('apertar logo de novo (sem trava de 150 ms) funciona', async () => {
 
 test('com o hook ativo, as teclas vão direto pelo hook (sem worker)', async () => {
   sys.setConfig({ macros: [gaga] });
-  assert.deepEqual(sys.directChords(), { 1: [{ vk: 0x43, scan: 0x2e, ext: 0 }, { vk: 0x20, scan: 0x39, ext: 0 }] });
+  assert.deepEqual(sys.directChords(), { 1: { keys: [{ vk: 0x43, scan: 0x2e, ext: 0 }, { vk: 0x20, scan: 0x39, ext: 0 }], block: true } });
   // não vira direto: "só no Roblox", mais de uma etapa, ou gatilho que não é lateral
   sys.setConfig({ macros: [{ ...gaga, robloxOnly: true }] });
   assert.deepEqual(sys.directChords(), {});

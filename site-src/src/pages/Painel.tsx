@@ -1,7 +1,8 @@
 import {
-  CircleAlert, CircleCheck, Crosshair, Database, Eraser, Layers, LoaderCircle, Play, RefreshCw, TriangleAlert,
+  Activity, CircleAlert, CircleCheck, Crosshair, Database, Eraser, Gauge, Layers, LoaderCircle, Play, RefreshCw, TriangleAlert,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { validateAll } from '../core/macros';
 import { navigate } from '../App';
 import { type StatusInfo, compatStatus, helperStatus, offsetStatus, robloxStatus } from '../state/status';
 import { store, useApp } from '../state/store';
@@ -34,7 +35,12 @@ export function PainelPage({ invalidCount }: { invalidCount: number }) {
   const presets = useApp((s) => s.presets);
   const activeId = useApp((s) => s.activePresetId);
   const busy = useApp((s) => s.busy);
+  const live = useApp((s) => s.live);
+  const history = useApp((s) => s.history);
   const [cleaning, setCleaning] = useState(false);
+  useEffect(() => store.watchLive(), []);
+  const issues = useMemo(() => validateAll(macros), [macros]);
+  const recentErrors = history.filter((h) => h.result === 'erro').slice(-4).reverse();
 
   const h = helperStatus(helper, checked);
   const r = robloxStatus(helper);
@@ -99,25 +105,40 @@ export function PainelPage({ invalidCount }: { invalidCount: number }) {
         </Card>
 
         <Card
-          title="Ações"
+          title="Executor e ações"
           icon={<Crosshair size={18} />}
-          actions={<Button size="sm" variant="ghost" onClick={() => navigate('acoes')}>Gerenciar</Button>}
+          actions={<div className="row" style={{ gap: 4 }}><Button size="sm" variant="ghost" onClick={() => navigate('diagnostico')}>Diagnóstico</Button><Button size="sm" variant="ghost" onClick={() => navigate('acoes')}>Gerenciar</Button></div>}
         >
-          <div className="col" style={{ gap: 8 }}>
-            <span className="muted" style={{ fontSize: 13 }}>
-              {macros.macros.filter((m) => m.enabled).length} ativas · {macros.macros.filter((m) => !m.enabled).length} desativadas
-            </span>
+          <div className="col" style={{ gap: 12 }}>
+            <div className="stat-tiles small">
+              <div className="stat"><strong>{macros.macros.length}</strong><span>ações</span></div>
+              <div className="stat"><strong>{macros.categories.length}</strong><span>categorias</span></div>
+              <div className={`stat ${macros.macros.some((m) => m.enabled) ? 'ok' : ''}`}><strong>{macros.macros.filter((m) => m.enabled).length}</strong><span>ativas</span></div>
+              <div className={`stat ${live?.running.length ? 'live' : ''}`}><strong>{live?.running.length ?? 0}</strong><span>rodando</span></div>
+              <div className={`stat ${!helper ? 'bad' : live?.hookReady ? 'ok' : 'warn'}`}><strong>{!helper ? 'off' : live ? (live.hookReady ? 'hook' : 'polling') : '…'}</strong><span>executor</span></div>
+              <button type="button" className={`stat ${issues.length ? 'warn' : ''}`} onClick={() => navigate('acoes')}><strong>{issues.length}</strong><span>avisos</span></button>
+            </div>
+            {recentErrors.length > 0 && (
+              <div className="col" style={{ gap: 4 }}>
+                <span className="field-label" style={{ color: '#ff8a8d' }}><TriangleAlert size={13} /> Erros recentes</span>
+                {recentErrors.map((h) => <span key={h.seq} className="faint" style={{ fontSize: 12.5 }}>{new Date(h.at).toLocaleTimeString('pt-BR')} · <strong>{h.name}</strong>: {h.error}</span>)}
+              </div>
+            )}
+            {!!live?.running.length && <span className="row" style={{ gap: 6, fontSize: 12.5 }}><Activity size={13} /> Rodando: {live.running.map((r) => r.name).join(', ')}</span>}
             {macros.macros.length === 0 && <span className="faint">Nenhuma ação criada.</span>}
-            {macros.macros.slice(0, 8).map((m) => (
+            {macros.macros.filter((m) => m.enabled).slice(0, 6).map((m) => (
               <div key={m.id} className="row" style={{ justifyContent: 'space-between' }}>
                 <span className="row truncate" style={{ gap: 8 }}>
-                  <span className={`status-pill ${m.enabled ? 'on' : 'off'}`}>{m.enabled ? '● Ativa' : '○ Desativada'}</span>
-                  <span className="truncate" style={{ fontWeight: 600, color: m.enabled ? 'var(--text)' : 'var(--text-3)' }}>{m.name}</span>
+                  <span className="status-pill on">● Ativa</span>
+                  <span className="truncate" style={{ fontWeight: 600 }}>{m.name}</span>
                 </span>
                 <KeyBadge code={m.trigger} />
               </div>
             ))}
-            {macros.macros.length > 8 && <span className="faint" style={{ fontSize: 12.5 }}>+ {macros.macros.length - 8} ações</span>}
+            <div className="row wrap" style={{ gap: 6 }}>
+              <Button size="sm" icon={<Crosshair />} onClick={() => navigate('acoes')}>Ações</Button>
+              <Button size="sm" icon={<Gauge />} onClick={() => navigate('diagnostico')}>Latência e histórico</Button>
+            </div>
           </div>
         </Card>
       </div>

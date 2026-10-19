@@ -1,10 +1,13 @@
-import { Circle, Copy, Download, Plus, Square, Upload } from 'lucide-react';
+import { Circle, Copy, Download, Pencil, Plus, Square, Trash2, Upload } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
-  type ImportedPack, TEMPLATES, describeStep, importCollisions, parseMacroImport, sanitizeStep, triggerLabel, type MacroStep,
+  type BatchPatch, DEFAULT_TIMING, GROUP_POLICIES, type GroupPolicy, type ImportedPack, MODES, type MacroMode, RETRIGGERS, type Retrigger,
+  TEMPLATES, type TimingPreset, type TimingValues, describeStep, importCollisions, newPresetId, parseMacroImport, sanitizeStep,
+  triggerLabel, type MacroStep,
 } from '../core/macros';
 import { store, useApp } from '../state/store';
-import { Button, Modal, Notice } from '../ui/components';
+import { Button, Modal, Notice, Switch } from '../ui/components';
+import { TimingInputs } from '../ui/fields';
 
 // ───────── gravador ─────────
 
@@ -173,6 +176,7 @@ export function ImportMacrosDialog({ onClose }: { onClose: () => void }) {
             <Notice tone="ok">
               {pack!.items.length} {pack!.items.length === 1 ? 'ação' : 'ações'}{pack!.items.length ? `: ${pack!.items.map((i) => i.macro.name).join(', ')}` : ''}.
               {pack!.categories.length ? ` Categoria(s): ${pack!.categories.join(', ')}.` : ' Sem categoria.'} Entram desativadas.
+              {pack!.timingPresets?.length ? ` ${pack!.timingPresets.length} preset(s) de tempo (nenhum existente é sobrescrito).` : ''}
             </Notice>
             {collisions.length > 0 && (
               <Notice tone="warn">
@@ -226,6 +230,113 @@ export function TemplatesDialog({ onClose }: { onClose: () => void }) {
             </div>
             <Button size="sm" icon={<Plus />} onClick={() => store.addTemplate(t.id)}>Adicionar</Button>
           </div>
+        ))}
+      </div>
+    </Modal>
+  );
+}
+
+// ───────── presets de temporização ─────────
+
+/** Cria, edita e exclui presets de tempo. Aplicar numa ação só acontece quando o usuário pede. */
+export function TimingPresetsDialog({ onClose }: { onClose: () => void }) {
+  const presets = useApp((s) => s.macros.timingPresets);
+  const [editing, setEditing] = useState<TimingPreset | null>(null);
+  return (
+    <Modal title="Presets de tempo" wide onClose={onClose} footer={<Button onClick={onClose}>Fechar</Button>}>
+      <p className="muted" style={{ margin: 0 }}>Conjuntos de delays e comportamento para reaplicar. Aplicar um preset nunca acontece sozinho: escolha no editor da ação ou nas selecionadas.</p>
+      {editing ? (
+        <div className="col" style={{ gap: 12 }}>
+          <label className="col">
+            <span className="field-label">Nome do preset</span>
+            <input className="input" value={editing.name} maxLength={40} onChange={(e) => setEditing({ ...editing, name: e.target.value })} aria-label="Nome do preset" />
+          </label>
+          <TimingInputs value={editing.values} onChange={(values) => setEditing({ ...editing, values })} prefix="Preset: " />
+          <div className="row wrap">
+            <Button onClick={() => setEditing(null)}>Cancelar</Button>
+            <Button variant="primary" disabled={!editing.name.trim()} onClick={() => { store.saveTimingPreset(editing); setEditing(null); }}>Salvar preset</Button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="list">
+            {presets.length === 0 && <div className="list-row faint">Nenhum preset.</div>}
+            {presets.map((p) => (
+              <div key={p.id} className="list-row">
+                <div className="col" style={{ gap: 2, flex: 1, minWidth: 0 }}>
+                  <strong>{p.name}</strong>
+                  <span className="faint truncate" style={{ fontSize: 12 }}>{describeTiming(p.values)}</span>
+                </div>
+                <Button size="sm" variant="ghost" icon={<Pencil />} onClick={() => setEditing(structuredClone(p))} aria-label={`Editar preset ${p.name}`} />
+                <Button size="sm" variant="ghost" icon={<Trash2 />} onClick={() => store.removeTimingPreset(p.id)} aria-label={`Excluir preset ${p.name}`} />
+              </div>
+            ))}
+          </div>
+          <Button icon={<Plus />} onClick={() => setEditing({ id: newPresetId(), name: 'Novo preset', values: { ...DEFAULT_TIMING } })} style={{ justifySelf: 'start' }}>Novo preset</Button>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+export function describeTiming(v: TimingValues): string {
+  const parts = [`início ${v.startDelay} ms`, `entre etapas ${v.stepGap} ms`, `repetições ${v.loopDelay} ms`, `final ${v.endDelay} ms`];
+  if (v.speed !== 1) parts.push(`${v.speed}×`);
+  parts.push(v.debounce ? `trava ${v.debounce} ms` : 'sem trava');
+  parts.push(`apertar de novo: ${RETRIGGERS.find(([k]) => k === v.onRetrigger)?.[1].toLowerCase()}`);
+  return parts.join(' · ');
+}
+
+// ───────── edição em lote ─────────
+
+type BatchField = keyof BatchPatch;
+const BATCH_FIELDS: Array<[BatchField, string]> = [
+  ['mode', 'Modo'], ['repeat', 'Repetições'], ['startDelay', 'Delay inicial'], ['stepGap', 'Delay entre etapas'], ['loopDelay', 'Delay entre repetições'],
+  ['endDelay', 'Delay final'], ['speed', 'Velocidade'], ['debounce', 'Trava anti-repetição'], ['onRetrigger', 'Apertar de novo'],
+  ['robloxOnly', 'Só com o Roblox em foco'], ['group', 'Grupo'], ['priority', 'Prioridade'], ['groupPolicy', 'Empate no grupo'], ['blockTrigger', 'Bloquear o botão (segurar junto)'],
+];
+
+/** Muda de uma vez só os campos marcados em todas as ações selecionadas. */
+export function BatchEditDialog({ ids, onClose }: { ids: string[]; onClose: () => void }) {
+  const [on, setOn] = useState<Set<BatchField>>(new Set());
+  const [v, setV] = useState<Required<BatchPatch>>({
+    mode: 'once', repeat: 1, ...DEFAULT_TIMING, robloxOnly: true, group: '', priority: 0, groupPolicy: 'interrupt', blockTrigger: true,
+  });
+  const mark = (k: BatchField, val: boolean) => setOn((cur) => { const n = new Set(cur); val ? n.add(k) : n.delete(k); return n; });
+  const set = <K extends BatchField>(k: K, val: Required<BatchPatch>[K]) => { setV((cur) => ({ ...cur, [k]: val })); mark(k, true); };
+  const apply = () => {
+    const patch: BatchPatch = {};
+    for (const k of on) (patch as Record<string, unknown>)[k] = v[k];
+    store.patchMany(ids, patch);
+    onClose();
+  };
+  const input = (k: BatchField) => {
+    switch (k) {
+      case 'mode': return <select className="select" value={v.mode} onChange={(e) => set('mode', e.target.value as MacroMode)} aria-label="Lote: modo">{MODES.map(([m, l]) => <option key={m} value={m}>{l}</option>)}</select>;
+      case 'onRetrigger': return <select className="select" value={v.onRetrigger} onChange={(e) => set('onRetrigger', e.target.value as Retrigger)} aria-label="Lote: apertar de novo">{RETRIGGERS.map(([m, l]) => <option key={m} value={m}>{l}</option>)}</select>;
+      case 'groupPolicy': return <select className="select" value={v.groupPolicy} onChange={(e) => set('groupPolicy', e.target.value as GroupPolicy)} aria-label="Lote: empate no grupo">{GROUP_POLICIES.map(([m, l]) => <option key={m} value={m}>{l}</option>)}</select>;
+      case 'robloxOnly': case 'blockTrigger': return <Switch checked={v[k]} onChange={(b) => set(k, b)} label={`Lote: ${BATCH_FIELDS.find(([f]) => f === k)![1]}`} />;
+      case 'group': return <input className="input" value={v.group} maxLength={40} onChange={(e) => set('group', e.target.value)} aria-label="Lote: grupo" placeholder="vazio = sem grupo" />;
+      default: return <input className="input" type="number" value={v[k] as number} step={k === 'speed' ? 0.1 : 1} onChange={(e) => set(k, Number(e.target.value) || 0)} aria-label={`Lote: ${BATCH_FIELDS.find(([f]) => f === k)![1]}`} />;
+    }
+  };
+  return (
+    <Modal
+      title={`Editar ${ids.length} ${ids.length === 1 ? 'ação' : 'ações'} em lote`}
+      wide
+      onClose={onClose}
+      footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={!on.size} onClick={apply}>Aplicar {on.size ? `(${on.size} ${on.size === 1 ? 'campo' : 'campos'})` : ''}</Button></>}
+    >
+      <p className="muted" style={{ margin: 0 }}>Marque só o que quer mudar. Os outros campos de cada ação ficam como estão.</p>
+      <div className="batch-grid">
+        {BATCH_FIELDS.map(([k, label]) => (
+          <label key={k} className={`batch-field ${on.has(k) ? 'on' : ''}`}>
+            <span className="row" style={{ gap: 8 }}>
+              <input type="checkbox" checked={on.has(k)} onChange={(e) => mark(k, e.target.checked)} aria-label={`Mudar ${label}`} />
+              <span className="field-label">{label}</span>
+            </span>
+            {input(k)}
+          </label>
         ))}
       </div>
     </Modal>

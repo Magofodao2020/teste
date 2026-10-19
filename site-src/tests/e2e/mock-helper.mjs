@@ -8,6 +8,9 @@ export function startMockHelper({ port = 7962, running = 'version-cec3ad5889b447
     rec: { state: 'idle', events: 0, startedAt: 0, timer: null, result: null },
     capture: { id: 0, active: false, code: null, opts: null },
     turbo: { active: false, intervalMs: 1000, reapplied: 0 },
+    // executor ao vivo + histórico (o teste/capturas podem preencher)
+    live: { running: [], queued: [], hookReady: true, workers: { total: 2, busy: 0, max: 16 }, sides: {}, direct: {}, directWhy: {}, historySeq: 0, simulated: false },
+    history: [],
   };
   const status = () => ({
     ok: true, helper: 'gerenciador-helper', helperVersion: '2.3.0', platform: 'win32', ffiReady: true,
@@ -28,6 +31,11 @@ export function startMockHelper({ port = 7962, running = 'version-cec3ad5889b447
     const path = req.url.split('?')[0];
     if (req.method === 'GET') {
       if (path === '/status') return send(status());
+      if (path === '/macro/state') return send({ ok: true, ...state.live, historySeq: state.history.length ? state.history[state.history.length - 1].seq : 0 });
+      if (path === '/macro/history') {
+        const since = Number(new URL(req.url, 'http://x').searchParams.get('since')) || 0;
+        return send({ ok: true, seq: state.history.length ? state.history[state.history.length - 1].seq : 0, items: state.history.filter((h) => h.seq > since) });
+      }
       if (path === '/capture/status') return send({ ok: true, id: state.capture.id, active: state.capture.active, code: state.capture.code });
       if (path === '/macro/record/status') {
         const r = state.rec;
@@ -77,7 +85,8 @@ export function startMockHelper({ port = 7962, running = 'version-cec3ad5889b447
           return send({ ok: true, id: state.capture.id, hookReady: true, message: 'Pressione um botão ou tecla.' });
         case '/capture/stop': state.capture.active = false; return send({ ok: true, message: 'Captura encerrada.' });
         case '/macro/cursor': return send({ ok: true, x: 640, y: 360 });
-        case '/macro/stop': return send({ ok: true, stopped: 0, message: 'Nenhum macro rodando.' });
+        case '/macro/stop': state.live.running = data.id ? state.live.running.filter((r) => r.id !== data.id) : []; return send({ ok: true, stopped: 0, message: 'Nenhum macro rodando.' });
+        case '/macro/history/clear': state.history = []; return send({ ok: true, message: 'Histórico limpo.' });
         case '/pause': state.turbo.active = false; return send({ ok: true, message: 'Configurações despausadas.' });
         case '/resume': return send({ ok: true, message: 'Aplicado.' });
         default: return send({ ok: false, message: 'rota desconhecida' });
