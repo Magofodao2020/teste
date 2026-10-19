@@ -422,6 +422,11 @@ describe('ações e macros', () => {
     await row(page, 'Gagatech').getByRole('button', { name: 'Editar' }).click();
     assert.equal(await page.getByRole('button', { name: 'Segurar junto' }).getAttribute('aria-pressed'), 'true');
     await page.getByText('Aperta juntas: C + Espaço').first().waitFor();
+    // intervalo entre as teclas juntas
+    await page.getByLabel('Intervalo entre as teclas da etapa 1').fill('15');
+    await page.getByText('Aperta juntas: C + Espaço (15 ms entre as teclas)').first().waitFor();
+    await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+    await waitFor(() => helper.state.macros.find((m) => m.id === 'gagatech')?.steps[0].gap === 15);
     assert.deepEqual(errors, []);
     await ctx.close();
   });

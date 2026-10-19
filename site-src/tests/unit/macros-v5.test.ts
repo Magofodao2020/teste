@@ -139,6 +139,10 @@ describe('modelo v5 das ações', () => {
     expect(directBlocker({ ...g, trigger: 'KeyG' })).toMatch(/lateral/);
     expect(directBlocker({ ...g, startDelay: 5 })).toMatch(/espera/);
     expect(directBlocker({ ...g, trigger: 'MouseMiddle' })).toBeNull();
+    const gapped = sanitizeMacro({ ...g, steps: [{ t: 'keysdown', codes: ['KeyC', 'Space'], gap: 15 }] })!;
+    expect(gapped.steps[0].gap).toBe(15);
+    expect(directBlocker(gapped)).toMatch(/intervalo entre as teclas/);
+    expect(macroMs(gapped)).toBe(15);
   });
 });
 

@@ -84,3 +84,30 @@ test('com o hook ativo, as teclas vão direto pelo hook (sem worker)', async () 
   sys.onUp('MouseBack');
   sys.attachHook(null);
 });
+
+test('intervalo entre as teclas juntas: descem e sobem uma a uma com a espera configurada', async () => {
+  sys.attachHook(null);
+  const withGap = { ...gaga, steps: [{ t: 'keysdown', codes: ['KeyC', 'Space'], gap: 30 }] };
+  assert.equal(sanitizeMacro(withGap).steps[0].gap, 30);
+  sys.setConfig({ macros: [withGap] });
+  assert.deepEqual(sys.directChords(), {}, 'com intervalo não roda direto no hook');
+  const before = sys.lastRun('gagatech');
+  sys.onDown('MouseBack');
+  await sleep(120);
+  sys.onUp('MouseBack');
+  for (let i = 0; i < 100 && sys.lastRun('gagatech') === before; i++) await sleep(10);
+  const log = sys.lastRun('gagatech').mockLog;
+  assert.deepEqual(log.map((e) => [e.keys.length, e.keys[0].vk, e.keys[0].up]), [[1, 0x43, false], [1, 0x20, false], [1, 0x43, true], [1, 0x20, true]]);
+  const downGap = log[1].t - log[0].t, upGap = log[3].t - log[2].t;
+  assert.ok(downGap >= 29 && downGap < 70, `apertar: ${downGap} ms`);
+  assert.ok(upGap >= 29 && upGap < 70, `soltar: ${upGap} ms`);
+});
+
+test('intervalo com toque rapidíssimo ainda aperta as duas e solta', async () => {
+  const withGap = { ...gaga, steps: [{ t: 'keysdown', codes: ['KeyC', 'Space'], gap: 10 }] };
+  sys.setConfig({ macros: [withGap] });
+  const before = sys.lastRun('gagatech');
+  sys.onDown('MouseBack'); sys.onUp('MouseBack');
+  for (let i = 0; i < 100 && sys.lastRun('gagatech') === before; i++) await sleep(10);
+  assert.equal(sys.lastRun('gagatech').mockLog.length, 4);
+});

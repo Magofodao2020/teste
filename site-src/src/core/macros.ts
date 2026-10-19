@@ -305,6 +305,7 @@ export function sanitizeStep(s: unknown): MacroStep | null {
     case 'keysdown': {
       const list = (Array.isArray(i.codes) ? i.codes : []).filter((c): c is string => typeof c === 'string' && !!c).slice(0, 10).map((c) => c.slice(0, 40));
       o.codes = list.length ? list : ['KeyC', 'Space'];
+      if (pos(i.gap) > 0) o.gap = pos(i.gap); // intervalo entre as teclas (0 = todas no mesmo envio)
       break;
     }
     case 'text':
@@ -996,7 +997,7 @@ function describeStepBody(s: MacroStep): string {
     case 'key': return `${pre}Tecla ${triggerLabel(String(s.code))}${n('n') > 1 ? ` ×${n('n')}` : ''} (segura ${n('hold')} ms)`;
     case 'keydown': return `${pre}Segura a tecla ${triggerLabel(String(s.code))}`;
     case 'keyup': return `${pre}Solta a tecla ${triggerLabel(String(s.code))}`;
-    case 'keysdown': return `${pre}Aperta juntas: ${((s.codes as string[]) ?? []).map((c) => triggerLabel(c)).join(' + ')}`;
+    case 'keysdown': return `${pre}Aperta juntas: ${((s.codes as string[]) ?? []).map((c) => triggerLabel(c)).join(' + ')}${n('gap') ? ` (${n('gap')} ms entre as teclas)` : ''}`;
     case 'click': return `${pre}Clique ${BTN_NAMES[String(s.btn)] ?? s.btn}${n('n') > 1 ? ` ×${n('n')}` : ''} (segura ${n('hold')} ms)`;
     case 'down': return `${pre}Segura o botão ${BTN_NAMES[String(s.btn)] ?? s.btn}`;
     case 'up': return `${pre}Solta o botão ${BTN_NAMES[String(s.btn)] ?? s.btn}`;
@@ -1021,6 +1022,7 @@ export function stepMs(s: MacroStep): number {
     case 'click': case 'key': { const c = Math.max(1, n('n', 1)); ms += c * n('hold', 40) + (c - 1) * n('gap', 60); break; }
     case 'scroll': ms += Math.max(0, Math.abs(n('amount', 1)) - 1) * n('gap', 20); break;
     case 'text': ms += Math.max(0, String(s.text ?? '').length - 1) * n('gap', 15); break;
+    case 'keysdown': ms += Math.max(0, ((s.codes as string[]) ?? []).length - 1) * n('gap'); break;
   }
   return ms;
 }
@@ -1056,6 +1058,7 @@ export function directBlocker(m: Macro): string | null {
   const on = m.steps.filter((s) => !s.off);
   if (on.length !== 1 || on[0].t !== 'keysdown') return 'precisa de uma única etapa "Apertar teclas juntas"';
   if (on[0].delay || m.startDelay) return 'tem espera antes das teclas';
+  if (Number(on[0].gap) > 0) return 'tem intervalo entre as teclas (o hook não pode esperar; o executor faz o intervalo exato)';
   const codes = (on[0].codes as string[]) ?? [];
   if (!codes.length || codes.length > 4) return 'precisa de 1 a 4 teclas';
   return null;

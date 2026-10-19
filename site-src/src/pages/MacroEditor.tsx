@@ -398,8 +398,9 @@ function StepFields({ step, index, onChange }: { step: MacroStep; index: number;
               ))}
               {codes.length < 10 && <Button size="sm" onClick={() => setCodes([...codes, 'KeyE'])}>+ Tecla</Button>}
             </div>
-            <span className="faint" style={{ fontSize: 12 }}>Descem juntas num único envio. Ficam seguradas até o fim da ação (no modo “Segurar junto”, até soltar o botão) e sobem juntas.</span>
+            <span className="faint" style={{ fontSize: 12 }}>{n('gap') ? `Descem uma a uma com ${n('gap')} ms entre elas e sobem na mesma ordem com o mesmo intervalo.` : 'Intervalo 0: descem juntas num único envio e sobem juntas.'} Ficam seguradas até o fim da ação (no modo “Segurar junto”, até soltar o botão).</span>
           </div>
+          <NumField label="Intervalo entre as teclas" ariaLabel={`Intervalo entre as teclas da etapa ${index + 1}`} suffix="ms" value={n('gap')} onChange={(v) => onChange(v > 0 ? { ...step, gap: v } : (({ gap: _g, ...rest }) => rest as MacroStep)(step))} hint="0 = todas ao mesmo tempo (execução direta no hook)." />
           {delays}
         </Fields>
       );
