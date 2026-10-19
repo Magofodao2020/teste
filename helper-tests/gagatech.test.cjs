@@ -4,7 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createMacroSystem, sanitizeMacro } = require(process.env.HELPER_DIR + '/521.js');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const sys = createMacroSystem({ codeToVk: () => 0, isWin: false, hasFfi: false, log: () => {} });
+const logs = [];
+const sys = createMacroSystem({ codeToVk: () => 0, isWin: false, hasFfi: false, log: (...a) => logs.push(a.join(' ')) });
 const gaga = { id: 'gagatech', name: 'Gagatech', enabled: true, trigger: 'MouseBack', mode: 'mirror', repeat: 1, speed: 1, robloxOnly: false, steps: [{ t: 'keysdown', codes: ['KeyC', 'Space'] }] };
 
 test.after(() => { setTimeout(() => process.exit(0), 50); });
@@ -70,13 +71,16 @@ test('com o hook ativo, as teclas vão direto pelo hook (sem worker)', async () 
   assert.deepEqual(sys.directChords(), {});
   sys.setConfig({ macros: [{ ...gaga, trigger: 'KeyG' }] });
   assert.deepEqual(sys.directChords(), {});
-  // hook pronto: o main não roda a ação de novo (o hook já apertou)
-  sys.setConfig({ macros: [gaga] });
+  // hook pronto: o main não roda a ação de novo (o hook já apertou) e outra ação
+  // no mesmo lateral (Bug Indi) não roda junto — o botão é só da Gagatech
+  const bug = { id: 'bug', name: 'Bug Indi', enabled: true, trigger: 'MouseBack', mode: 'once', repeat: 1, speed: 1, robloxOnly: false, steps: [{ t: 'wait', ms: 200 }] };
+  sys.setConfig({ macros: [gaga, bug] });
   sys.attachHook({ shared: new Int32Array(16), ready: true });
   await sleep(300);
   sys.onDown('MouseBack');
   await sleep(100);
-  assert.equal(sys.state().running.length, 0, 'nada rodando no worker');
+  assert.equal(sys.state().running.length, 0, 'nada rodando no worker (nem o Bug Indi)');
+  assert.ok(logs.some((l) => l.includes('"Bug Indi" está no mesmo botão de "Gagatech"')));
   sys.onUp('MouseBack');
   sys.attachHook(null);
 });
