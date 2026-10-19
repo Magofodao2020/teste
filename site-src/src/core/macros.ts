@@ -6,9 +6,9 @@
 //  - Só existem os tipos de etapa que o Helper executa (521.js: STEP_TYPES).
 //  - A sanitização espelha a do Helper (521.js: sanitizeStep/sanitizeMacro).
 
-export type StepType = 'flick' | 'move' | 'path' | 'click' | 'down' | 'up' | 'scroll' | 'key' | 'keydown' | 'keyup' | 'text' | 'wait';
+export type StepType = 'flick' | 'move' | 'path' | 'click' | 'down' | 'up' | 'scroll' | 'key' | 'keydown' | 'keyup' | 'keysdown' | 'text' | 'wait';
 export type MacroStep = { t: StepType; delay?: number } & Record<string, unknown>;
-export type MacroMode = 'once' | 'loop' | 'hold';
+export type MacroMode = 'once' | 'loop' | 'hold' | 'mirror';
 
 export interface Macro {
   id: string;
@@ -42,12 +42,15 @@ export interface MacrosState {
   categories: Category[];
   macros: Macro[];
   stopKey: string;
+  /** Revisão dos modelos já aplicada (2 = Gagatech "segurar junto", C + Espaço). */
+  templatesRev?: number;
 }
 
 export const STEP_TYPES: ReadonlyArray<readonly [StepType, string]> = [
   ['key', 'Tecla'],
   ['keydown', 'Segurar tecla'],
   ['keyup', 'Soltar tecla'],
+  ['keysdown', 'Apertar teclas juntas'],
   ['click', 'Clique'],
   ['down', 'Segurar botão do mouse'],
   ['up', 'Soltar botão do mouse'],
@@ -64,7 +67,7 @@ export const MOUSE_BUTTONS: ReadonlyArray<readonly [string, string]> = [
 ];
 const BTNSET = new Set(MOUSE_BUTTONS.map((b) => b[0]));
 export const MODES: ReadonlyArray<readonly [MacroMode, string]> = [
-  ['once', 'Uma vez'], ['loop', 'Loop (liga/desliga)'], ['hold', 'Enquanto segurar'],
+  ['once', 'Uma vez'], ['loop', 'Loop (liga/desliga)'], ['hold', 'Enquanto segurar'], ['mirror', 'Segurar junto'],
 ];
 
 // ───────── modelos (pack fornecido, valores exatos) ─────────
@@ -103,13 +106,12 @@ export const DEFAULT_PACK: { bope: 'macro-pack'; v: 1; macros: PackMacro[] } = {
       trigger: 'MouseRight',
     },
     {
-      bope: 'macro', v: 1, name: 'Gagatech', mode: 'once', repeat: 1, loopDelay: 0, speed: 1, robloxOnly: true,
-      steps: [
-        { t: 'key', code: 'Space', n: 1, hold: 0, gap: 60 },
-        { t: 'key', code: 'KeyC', n: 1, hold: 0, gap: 60 },
-        { t: 'key', code: 'KeyQ', n: 1, hold: 0, gap: 60 },
-      ],
-      trigger: 'MouseForward',
+      // Igual ao script Gagatech.js: segurar o lateral ◄ (XBUTTON1) aperta C + Espaço
+      // AO MESMO TEMPO (um único SendInput); soltar o lateral solta os dois juntos.
+      // O lateral é bloqueado (não chega ao jogo/navegador) e não depende do foco.
+      bope: 'macro', v: 1, name: 'Gagatech', mode: 'mirror', repeat: 1, loopDelay: 0, speed: 1, robloxOnly: false,
+      steps: [{ t: 'keysdown', codes: ['KeyC', 'Space'] }],
+      trigger: 'MouseBack',
     },
   ],
 };
@@ -132,6 +134,20 @@ export function fromTemplate(t: Template, categoryId: string | null = null, id =
   };
 }
 
+export const TEMPLATES_REV = 2;
+
+/**
+ * Atualiza modelos salvos antes desta versão (uma vez só):
+ *   rev 2 — a Gagatech vira a do script Gagatech.js (C + Espaço juntos enquanto
+ *   segura o lateral ◄). Mantém a categoria; fica desativada como toda ação nova.
+ */
+function upgradeTemplates(st: MacrosState): MacrosState {
+  if ((st.templatesRev ?? 1) >= TEMPLATES_REV) return st;
+  const t = TEMPLATES.find((x) => x.id === 'gagatech')!;
+  const macros = st.macros.map((m) => (m.id === 'gagatech' ? fromTemplate(t, m.categoryId, 'gagatech') : m));
+  return { ...st, macros, templatesRev: TEMPLATES_REV };
+}
+
 /** Primeira abertura: os cinco modelos, em categorias (Bug Indi, GK), todos desativados. */
 export function defaultMacrosState(): MacrosState {
   const categories: Category[] = [];
@@ -140,7 +156,7 @@ export function defaultMacrosState(): MacrosState {
     if (!idByName.has(t.group)) { const id = newCategoryId(); idByName.set(t.group, id); categories.push({ id, name: t.group }); }
   }
   const macros = TEMPLATES.map((t) => fromTemplate(t, idByName.get(t.group)!));
-  return { v: 4, categories, macros, stopKey: 'F8' };
+  return { v: 4, categories, macros, stopKey: 'F8', templatesRev: TEMPLATES_REV };
 }
 
 // ───────── ids / validação ─────────
@@ -215,6 +231,11 @@ export function sanitizeStep(s: unknown): MacroStep | null {
     case 'keydown': case 'keyup':
       o.code = code(i.code, 'KeyW');
       break;
+    case 'keysdown': {
+      const list = (Array.isArray(i.codes) ? i.codes : []).filter((c): c is string => typeof c === 'string' && !!c).slice(0, 10).map((c) => c.slice(0, 40));
+      o.codes = list.length ? list : ['KeyC', 'Space'];
+      break;
+    }
     case 'text':
       o.text = String(i.text ?? '').slice(0, 5000); o.gap = pos(i.gap, 15);
       break;
@@ -251,7 +272,7 @@ export function sanitizeMacro(m: unknown, opts: { forceDisabled?: boolean; keepI
     categoryId: typeof i.categoryId === 'string' && i.categoryId ? i.categoryId.slice(0, 80) : null,
     enabled: opts.forceDisabled ? false : i.enabled === true,
     trigger: isValidTrigger(i.trigger) ? i.trigger : null,
-    mode: (['once', 'loop', 'hold'] as const).includes(i.mode as MacroMode) ? (i.mode as MacroMode) : 'once',
+    mode: (['once', 'loop', 'hold', 'mirror'] as const).includes(i.mode as MacroMode) ? (i.mode as MacroMode) : 'once',
     repeat: Math.max(1, Math.round(num(i.repeat, 1))),
     loopDelay: pos(i.loopDelay, 0),
     speed: Math.min(50, Math.max(0.05, num(i.speed, 1))),
@@ -318,7 +339,7 @@ export function restoreMacrosState(v4: unknown, v2?: unknown, v1?: unknown): Mac
       if (m.categoryId && !valid.has(m.categoryId)) m.categoryId = null; // categoria sumiu → sem categoria
       if (m.enabled && !canActivate(m)) m.enabled = false;
     }
-    return { v: 4, categories, macros, stopKey: isValidTrigger(s.stopKey) ? s.stopKey : 'F8' };
+    return upgradeTemplates({ v: 4, categories, macros, stopKey: isValidTrigger(s.stopKey) ? s.stopKey : 'F8', templatesRev: Number(s.templatesRev) || 1 });
   }
   // v3: ações com `group` (texto) → vira categorias-entidade, na ordem de aparição.
   if (v4 && typeof v4 === 'object' && (v4 as { v?: number }).v === 3) {
@@ -335,14 +356,14 @@ export function restoreMacrosState(v4: unknown, v2?: unknown, v1?: unknown): Mac
       if (m.enabled && !canActivate(m)) m.enabled = false;
       macros.push(m);
     }
-    return { v: 4, categories, macros, stopKey: isValidTrigger(s.stopKey) ? s.stopKey : 'F8' };
+    return upgradeTemplates({ v: 4, categories, macros, stopKey: isValidTrigger(s.stopKey) ? s.stopKey : 'F8' });
   }
   if (v2 && typeof v2 === 'object' && (v2 as { v?: number }).v === 2) {
     const s = v2 as { actions?: Array<{ id?: string; group?: string; trigger?: unknown; macro?: Record<string, unknown> }>; stopKey?: unknown };
     const base = defaultMacrosState();
     const byId = new Map((s.actions ?? []).map((a) => [a?.id, a]));
     for (const m of base.macros) {
-      const old = byId.get(m.id);
+      const old = m.id === 'gagatech' ? undefined : byId.get(m.id); // Gagatech mudou (rev 2): fica a nova
       if (old && (old.trigger === null || isValidTrigger(old.trigger))) m.trigger = (old.trigger as string | null) ?? null;
     }
     if (isValidTrigger(s.stopKey)) base.stopKey = s.stopKey;
@@ -699,6 +720,7 @@ export function describeStep(s: MacroStep): string {
     case 'key': return `${pre}Tecla ${triggerLabel(String(s.code))}${n('n') > 1 ? ` ×${n('n')}` : ''} (segura ${n('hold')} ms)`;
     case 'keydown': return `${pre}Segura a tecla ${triggerLabel(String(s.code))}`;
     case 'keyup': return `${pre}Solta a tecla ${triggerLabel(String(s.code))}`;
+    case 'keysdown': return `${pre}Aperta juntas: ${((s.codes as string[]) ?? []).map((c) => triggerLabel(c)).join(' + ')}`;
     case 'click': return `${pre}Clique ${BTN_NAMES[String(s.btn)] ?? s.btn}${n('n') > 1 ? ` ×${n('n')}` : ''} (segura ${n('hold')} ms)`;
     case 'down': return `${pre}Segura o botão ${BTN_NAMES[String(s.btn)] ?? s.btn}`;
     case 'up': return `${pre}Solta o botão ${BTN_NAMES[String(s.btn)] ?? s.btn}`;

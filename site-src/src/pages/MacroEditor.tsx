@@ -85,11 +85,11 @@ export function MacroEditor({ initial, isNew, onClose }: { initial: Macro; isNew
               {MODES.map(([v, l]) => <button key={v} type="button" aria-pressed={m.mode === v} onClick={() => patch({ mode: v as MacroMode })}>{l}</button>)}
             </div>
             <span className="faint" style={{ fontSize: 12 }}>
-              {m.mode === 'once' ? 'Roda as repetições e para. Apertar de novo durante a execução cancela.' : m.mode === 'loop' ? 'Aperta: começa a repetir. Aperta de novo: para.' : 'Repete enquanto o botão estiver pressionado.'}
+              {m.mode === 'once' ? 'Roda as repetições e para. Apertar de novo durante a execução cancela.' : m.mode === 'loop' ? 'Aperta: começa a repetir. Aperta de novo: para.' : m.mode === 'mirror' ? 'Apertou o botão: roda as etapas e segura as teclas. Soltou o botão: solta tudo junto. Lateral fica bloqueado (não volta a página).' : 'Repete enquanto o botão estiver pressionado.'}
             </span>
           </div>
           {m.mode === 'once' && <NumField label="Repetições" value={m.repeat} min={1} onChange={(v) => patch({ repeat: Math.max(1, Math.round(v)) })} />}
-          {(m.mode !== 'once' || m.repeat > 1) && <NumField label="Intervalo entre repetições" suffix="ms" value={m.loopDelay} onChange={(v) => patch({ loopDelay: v })} />}
+          {m.mode !== 'mirror' && (m.mode !== 'once' || m.repeat > 1) && <NumField label="Intervalo entre repetições" suffix="ms" value={m.loopDelay} onChange={(v) => patch({ loopDelay: v })} />}
           <NumField label="Velocidade" suffix="×" step={0.1} min={0.05} max={50} value={m.speed} onChange={(v) => patch({ speed: Math.min(50, Math.max(0.05, v || 1)) })} hint="2× = metade do tempo" />
           <div className="col">
             <span className="field-label">Só com o Roblox em foco</span>
@@ -228,6 +228,28 @@ function StepFields({ step, onChange }: { step: MacroStep; onChange: (s: MacroSt
           {delay}
         </Fields>
       );
+    case 'keysdown': {
+      const codes = Array.isArray(step.codes) ? (step.codes as string[]) : [];
+      const setCodes = (c: string[]) => set('codes', c);
+      return (
+        <Fields>
+          <div className="col" style={{ gridColumn: '1 / -1' }}>
+            <span className="field-label">Teclas (apertadas ao mesmo tempo, na ordem)</span>
+            <div className="row wrap">
+              {codes.map((c, i) => (
+                <span key={i} className="row" style={{ gap: 4 }}>
+                  <KeyCapture keyboardOnly value={c} onChange={(v) => setCodes(codes.map((x, j) => (j === i ? (v ?? x) : x)))} label={`Tecla ${i + 1} das teclas juntas`} placeholder="Definir tecla" />
+                  {codes.length > 1 && <Button size="sm" variant="ghost" icon={<X />} onClick={() => setCodes(codes.filter((_, j) => j !== i))} aria-label={`Remover tecla ${i + 1}`} />}
+                </span>
+              ))}
+              {codes.length < 10 && <Button size="sm" onClick={() => setCodes([...codes, 'KeyE'])}>+ Tecla</Button>}
+            </div>
+            <span className="faint" style={{ fontSize: 12 }}>Descem juntas num único envio. Ficam seguradas até o fim da ação (no modo “Segurar junto”, até soltar o botão) e sobem juntas.</span>
+          </div>
+          {delay}
+        </Fields>
+      );
+    }
     case 'keydown': case 'keyup':
       return (
         <Fields>

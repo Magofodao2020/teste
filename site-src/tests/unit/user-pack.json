@@ -112,35 +112,21 @@
       "bope": "macro",
       "v": 1,
       "name": "Gagatech",
-      "mode": "once",
+      "mode": "mirror",
       "repeat": 1,
       "loopDelay": 0,
       "speed": 1,
-      "robloxOnly": true,
+      "robloxOnly": false,
       "steps": [
         {
-          "t": "key",
-          "code": "Space",
-          "n": 1,
-          "hold": 0,
-          "gap": 60
-        },
-        {
-          "t": "key",
-          "code": "KeyC",
-          "n": 1,
-          "hold": 0,
-          "gap": 60
-        },
-        {
-          "t": "key",
-          "code": "KeyQ",
-          "n": 1,
-          "hold": 0,
-          "gap": 60
+          "t": "keysdown",
+          "codes": [
+            "KeyC",
+            "Space"
+          ]
         }
       ],
-      "trigger": "MouseForward"
+      "trigger": "MouseBack"
     }
   ]
 }

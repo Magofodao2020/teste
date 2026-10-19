@@ -25,7 +25,7 @@ describe('ações e macros', () => {
     const nameOf = (id: string | null) => st.categories.find((c) => c.id === id)?.name ?? null;
     expect(st.macros.map((m) => [m.name, m.trigger, nameOf(m.categoryId)])).toEqual([
       ['Bug Indi', 'MouseBack', 'Bug Indi'], ['Bug indi ESQUERDA', 'MouseForward', 'Bug Indi'], ['Bug indi DIREITA', 'MouseBack', 'Bug Indi'],
-      ['Perfect Dive', 'MouseRight', 'GK'], ['Gagatech', 'MouseForward', 'GK'],
+      ['Perfect Dive', 'MouseRight', 'GK'], ['Gagatech', 'MouseBack', 'GK'],
     ]);
     expect(st.macros.every((m) => m.enabled === false)).toBe(true);
   });
@@ -37,6 +37,21 @@ describe('ações e macros', () => {
       expect({ name: sent.name, mode: sent.mode, repeat: sent.repeat, loopDelay: sent.loopDelay, speed: sent.speed, robloxOnly: sent.robloxOnly, steps: sent.steps, trigger: sent.trigger }).toEqual(fields);
       expect(sent.enabled).toBe(false);
     });
+  });
+
+  it('Gagatech antiga salva vira a nova uma vez (C + Espaço juntos, segurar junto)', () => {
+    const old = defaultMacrosState();
+    const g = old.macros.find((m) => m.id === 'gagatech')!;
+    Object.assign(g, { mode: 'once', trigger: 'MouseForward', steps: [{ t: 'key', code: 'Space' }, { t: 'key', code: 'KeyC' }, { t: 'key', code: 'KeyQ' }] });
+    const { templatesRev: _r, ...saved } = old; // salvo antes da revisão 2
+    const st = restoreMacrosState(JSON.parse(JSON.stringify(saved)));
+    const ng = st.macros.find((m) => m.id === 'gagatech')!;
+    expect(ng).toMatchObject({ mode: 'mirror', trigger: 'MouseBack', robloxOnly: false, enabled: false, categoryId: g.categoryId });
+    expect(ng.steps).toEqual([{ t: 'keysdown', codes: ['KeyC', 'Space'] }]);
+    expect(st.templatesRev).toBe(2);
+    // depois da revisão, edições do usuário ficam
+    const edited = upsertMacro(st, { ...ng, trigger: 'F4' });
+    expect(restoreMacrosState(JSON.parse(JSON.stringify(edited))).macros.find((m) => m.id === 'gagatech')!.trigger).toBe('F4');
   });
 
   it('ativar/desativar uma, ativar todas e desativar todas', () => {

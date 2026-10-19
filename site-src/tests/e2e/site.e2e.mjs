@@ -412,6 +412,20 @@ describe('ações e macros', () => {
     await ctx.close();
   });
 
+  it('Gagatech: segurar junto com C + Espaço, enviada ao Helper', async () => {
+    const { page, ctx, errors } = await open({ [LIVE_URL]: { body: V_SITE } });
+    await page.goto(`${SITE}#/acoes`);
+    await waitFor(() => helper.state.macros?.some((m) => m.id === 'gagatech'));
+    const g = helper.state.macros.find((m) => m.id === 'gagatech');
+    assert.equal(g.mode, 'mirror'); assert.equal(g.trigger, 'MouseBack'); assert.equal(g.robloxOnly, false);
+    assert.deepEqual(g.steps, [{ t: 'keysdown', codes: ['KeyC', 'Space'] }]);
+    await row(page, 'Gagatech').getByRole('button', { name: 'Editar' }).click();
+    assert.equal(await page.getByRole('button', { name: 'Segurar junto' }).getAttribute('aria-pressed'), 'true');
+    await page.getByText('Aperta juntas: C + Espaço').first().waitFor();
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+
   it('definir botão pelo Helper (hook do Windows): lateral que o navegador não recebe, teclas, Esc e filtros', async () => {
     const { page, ctx, errors } = await open({ [LIVE_URL]: { body: V_SITE } });
     await page.goto(`${SITE}#/acoes`);
