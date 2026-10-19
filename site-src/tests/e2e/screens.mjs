@@ -1,0 +1,44 @@
+// Gera capturas de tela para revisão visual (não é teste). Uso: node tests/e2e/screens.mjs <pasta>
+import http from 'node:http';
+import { readFileSync, existsSync, statSync } from 'node:fs';
+import { extname, join, resolve } from 'node:path';
+import { chromium } from 'playwright-core';
+import { startMockHelper } from './mock-helper.mjs';
+const out = process.argv[2] || 'screens';
+const DIST = resolve('dist');
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.woff2': 'font/woff2' };
+const server = http.createServer((req, res) => { let f = join(DIST, decodeURIComponent(req.url.split('?')[0])); if (!existsSync(f) || statSync(f).isDirectory()) f = join(DIST, 'index.html'); res.writeHead(200, { 'Content-Type': MIME[extname(f)] ?? 'application/octet-stream' }); res.end(readFileSync(f)); });
+await new Promise((r) => server.listen(8834, '127.0.0.1', r));
+const helper = await startMockHelper({ running: 'version-cec3ad5889b447cf' });
+const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+async function ctx(viewport) {
+  const c = await browser.newContext({ viewport, deviceScaleFactor: 1 });
+  await c.route('https://offsets.imtheo.lol/**', (r) => r.fulfill({ body: 'version-cec3ad5889b447cf', headers: { 'Access-Control-Allow-Origin': '*' } }));
+  return c;
+}
+const c = await ctx({ width: 1360, height: 900 });
+const p = await c.newPage();
+await p.goto('http://127.0.0.1:8834/#/presets'); await p.waitForSelector('.topbar'); await p.waitForTimeout(1500);
+await p.getByRole('button', { name: 'Presets prontos' }).click();
+await p.getByRole('button', { name: 'Usar', exact: true }).first().click();
+await p.waitForTimeout(800);
+await p.screenshot({ path: `${out}-presets-full.png` });
+await p.getByRole('button', { name: 'Remover flags inválidas' }).first().click().catch(() => {});
+await p.waitForTimeout(500);
+await p.screenshot({ path: `${out}-invalid-dialog.png` });
+await p.keyboard.press('Escape');
+await p.goto('http://127.0.0.1:8834/#/painel'); await p.waitForTimeout(1500);
+await p.screenshot({ path: `${out}-painel-ok.png`, fullPage: true });
+await p.getByRole('button', { name: /Recolher menu/ }).click(); await p.waitForTimeout(400);
+await p.goto('http://127.0.0.1:8834/#/acoes'); await p.waitForTimeout(800);
+await p.screenshot({ path: `${out}-acoes-collapsed.png` });
+const m = await (await ctx({ width: 390, height: 844 })).newPage();
+await m.goto('http://127.0.0.1:8834/#/painel'); await m.waitForSelector('.topbar'); await m.waitForTimeout(1500);
+await m.screenshot({ path: `${out}-mobile-painel.png` });
+await m.goto('http://127.0.0.1:8834/#/acoes'); await m.waitForTimeout(800);
+await m.screenshot({ path: `${out}-mobile-acoes.png` });
+const b = await (await browser.newContext({ viewport: { width: 1360, height: 900 } })).newPage();
+await b.route('**/*.js', async (r) => { await new Promise((x) => setTimeout(x, 1500)); r.continue(); });
+b.goto('http://127.0.0.1:8834/'); await b.waitForTimeout(2200);
+await b.screenshot({ path: `${out}-boot.png` });
+await browser.close(); await helper.close(); server.close();

@@ -1,0 +1,6 @@
+/*
+  Cache-Control: no-cache
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+/data/dumps/version-*
+  Cache-Control: public, max-age=86400
